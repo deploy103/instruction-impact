@@ -1,0 +1,50 @@
+name: Instruction impact
+description: Review committed agent-instruction edits without executing target repository code
+inputs:
+  base:
+    description: Base commit SHA or ref (must be available locally)
+    required: true
+  head:
+    description: Head commit SHA or ref (must be available locally)
+    default: HEAD
+  repository:
+    description: Path to the repository to analyze
+    default: .
+  profile:
+    description: Discovery profile, agents or codex
+    default: agents
+outputs:
+  report-path:
+    description: Absolute path of the Markdown report
+    value: ${{ steps.report.outputs.report-path }}
+  json-path:
+    description: Absolute path of the complete JSON report
+    value: ${{ steps.report.outputs.json-path }}
+  existing-files-affected:
+    description: Number of existing files whose contributing source chain changed
+    value: ${{ steps.report.outputs.existing-files-affected }}
+runs:
+  using: composite
+  steps:
+    - id: report
+      shell: bash
+      env:
+        INPUT_BASE: ${{ inputs.base }}
+        INPUT_HEAD: ${{ inputs.head }}
+        INPUT_REPOSITORY: ${{ inputs.repository }}
+        INPUT_PROFILE: ${{ inputs.profile }}
+      run: |
+        set -euo pipefail
+        export PYTHONPATH="$GITHUB_ACTION_PATH/src"
+        output=$(mktemp -d "$RUNNER_TEMP/instruction-impact.XXXXXX")
+        python -P -m instruction_impact "$INPUT_BASE" "$INPUT_HEAD" \
+          --repo "$INPUT_REPOSITORY" --profile "$INPUT_PROFILE" --merge-base \
+          --format markdown > "$output/report.md"
+        python -P -m instruction_impact "$INPUT_BASE" "$INPUT_HEAD" \
+          --repo "$INPUT_REPOSITORY" --profile "$INPUT_PROFILE" --merge-base \
+          --format json > "$output/report.json"
+        echo "report-path=$output/report.md" >> "$GITHUB_OUTPUT"
+        echo "json-path=$output/report.json" >> "$GITHUB_OUTPUT"
+        count=$(python -P -c 'import json,sys; print(json.load(open(sys.argv[1]))["summary"]["existing_files_affected"])' "$output/report.json")
+        echo "existing-files-affected=$count" >> "$GITHUB_OUTPUT"
+        cat "$output/report.md" >> "$GITHUB_STEP_SUMMARY"

@@ -4,13 +4,16 @@ build-backend = "hatchling.build"
 
 [project]
 name = "instruction-impact"
-version = "0.1.0"
+version = "0.2.0"
 description = "Review the file-level blast radius of AGENTS.md changes between Git commits."
 readme = "README.md"
 requires-python = ">=3.10"
 license = "MIT"
 authors = [{name = "deploy103"}]
 dependencies = []
+
+[project.optional-dependencies]
+dev = ["ruff==0.15.6", "jsonschema>=4.23,<5"]
 
 [project.scripts]
 instruction-impact = "instruction_impact:main"
@@ -21,3 +24,14 @@ Issues = "https://github.com/deploy103/instruction-impact/issues"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/instruction_impact"]
+
+[tool.hatch.build.targets.sdist]
+exclude = ["/.amp/in"]
+
+[tool.ruff]
+target-version = "py310"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "UP"]
+ignore = ["E501"]

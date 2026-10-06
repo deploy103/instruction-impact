@@ -1,129 +1,222 @@
 # instruction-impact
 
-**An `AGENTS.md` edit can change the instructions for hundreds of files without changing a single line of code. Make that blast radius reviewable.**
+### Review the instructions that changed—not just the code that changed.
 
 [![Tests](https://github.com/deploy103/instruction-impact/actions/workflows/test.yml/badge.svg)](https://github.com/deploy103/instruction-impact/actions/workflows/test.yml)
-[한국어 안내](README.ko.md) · [Research and related tools](docs/research.md) · MIT
+**[한국어](README.ko.md)** · [Discovery model](docs/design.md) · [JSON contract](docs/json.md) · [Related work](docs/research.md)
 
-`instruction-impact` compares the root-to-directory `AGENTS.md` instruction sources for every tracked file in two Git commits. It highlights **unchanged files with changed instruction context**, along with the before/after source chains and instruction text diffs.
+A pull request changes `services/payments/AGENTS.md` from “run unit tests” to “skip tests for generated changes.” Git shows one Markdown edit. The review question is larger: **which files will now inherit that guidance, including files nobody touched?**
 
-- No API keys, LLMs, network calls, or runtime Python dependencies.
-- Reads Git objects only: no checkout, repository code execution, or worktree changes.
-- Text, JSON, and fenced Markdown reports for local review and CI.
-- Nested scopes, added/deleted instructions, and file additions/deletions.
+`instruction-impact` answers that question from two committed Git trees. It reports instruction edits, determines which sources contribute in each directory, and identifies every tracked file whose ordered instruction-source chain differs. It needs **Git and Python—not an AI model, API key, database, or session recorder.**
 
-## Install
+This is a review aid for teams maintaining agent guidance in nested repositories. It is not a linter for prose, an agent framework, or a claim that a particular agent actually read these files.
 
-Requires **Python 3.10+ and Git 2.20+**. Install from GitHub (not published to PyPI):
+## What an ordinary diff misses
 
-```sh
-pip install "git+https://github.com/deploy103/instruction-impact.git"
+```text
+repository/
+├── AGENTS.md                         repository-wide guidance
+├── services/
+│   ├── payments/
+│   │   ├── AGENTS.md                 payment-service guidance
+│   │   ├── checkout.py               unchanged code
+│   │   └── ledger/
+│   │       └── reconcile.py          unchanged code
+│   └── search/
+│       └── query.py                  outside the changed scope
+└── README.md
 ```
 
-Or clone and install locally:
+An edit to `services/payments/AGENTS.md` changes the source chain for both `checkout.py` and `reconcile.py`. It does not change the chain for `query.py`. Adding an override can be more subtle: in Codex mode, `AGENTS.override.md` replaces the regular instruction **in its directory**, not the root guidance.
+
+The report preserves that distinction:
+
+| Review question | Report evidence |
+| --- | --- |
+| What text or source presence changed? | Instruction inventory, blob IDs, normalized text diff |
+| Was that file actually selected? | `selected`, `shadowed`, `empty`, or `missing` on each side |
+| Which existing files have new instruction provenance? | Before/after source chains and per-file causes |
+| Which affected files are absent from the code diff? | `unchanged_files_affected` and `[unchanged]` labels |
+| Did several instruction edits affect the same file? | Per-edit attribution plus deduplicated global totals |
+
+## Try it with a real Git fixture
+
+Requires **Python 3.10+ and a modern Git installation**. The demo and tests use `git init -b`, available since Git 2.28. The GitHub Action requires Bash and Python 3.11+; the example provisions Python 3.12.
 
 ```sh
 git clone https://github.com/deploy103/instruction-impact.git
 cd instruction-impact
+python -m venv .venv
+. .venv/bin/activate
 python -m pip install .
+
 python examples/demo.py
 ```
 
-## Use
-
-Run inside the repository you want to review:
-
-```sh
-instruction-impact HEAD~1                   # compare to HEAD
-instruction-impact main feature-branch
-instruction-impact main HEAD --format json
-instruction-impact main HEAD --format markdown > impact.md
-instruction-impact main HEAD --fail-on-change
-instruction-impact main HEAD --repo /path/to/repo
-```
-
-For a PR, compare **merge-base to head**, not necessarily the current tip of main:
-
-```sh
-BASE=$(git merge-base origin/main HEAD)
-instruction-impact "$BASE" HEAD --format markdown
-```
-
-Both commits must be available locally. Shallow clones may require fetching additional history. Revision arguments resolve to commits; uncommitted or staged edits are intentionally ignored.
-
-## Example
-
-Given:
-
-```text
-AGENTS.md                 Run unit tests.
-api/AGENTS.md             Use transactions.
-api/auth.py
-api/deep/model.py
-apiary/sibling.py
-```
-
-Changing only `api/AGENTS.md` to “Use transactions and audit logs.” affects `api/auth.py` and `api/deep/model.py`, **not** `apiary/sibling.py`. The unchanged source files are visible even though a normal code diff only lists the instruction file.
-
-The reproducible demo creates two commits in a temporary repository, analyzes them, then deletes the fixture:
-
-```sh
-python examples/demo.py
-python examples/demo.py --format json
-python examples/demo.py --format markdown
-```
-
-Example text output (object IDs omitted here):
+The demo creates two commits in a temporary repository. Only the nested instruction changes; both source files stay unchanged. It cleans up the fixture afterward. Its text report includes:
 
 ```text
 1 instruction change(s); 2 affected file(s); 2 with unchanged file content/mode.
+
+INSTRUCTION EDITS
+  [modified] "api/AGENTS.md" — 2 affected file(s)
+    selection: selected -> selected
+
+CONTEXT TRANSITIONS
   [unchanged] "api/auth.py"
-    before: "AGENTS.md"@… -> "api/AGENTS.md"@…
-    after: "AGENTS.md"@… -> "api/AGENTS.md"@…
+    modified: "api/AGENTS.md"
+    before: "AGENTS.md"@fa088e0d -> "api/AGENTS.md"@3de1b019
+    after: "AGENTS.md"@fa088e0d -> "api/AGENTS.md"@07a33fe8
   [unchanged] "api/deep/model.py"
-    before: "AGENTS.md"@… -> "api/AGENTS.md"@…
-    after: "AGENTS.md"@… -> "api/AGENTS.md"@…
+    modified: "api/AGENTS.md"
+    before: "AGENTS.md"@fa088e0d -> "api/AGENTS.md"@3de1b019
+    after: "AGENTS.md"@fa088e0d -> "api/AGENTS.md"@07a33fe8
 ```
 
-## Precise scope and limitations
-
-This is a **source-scope change detector**, not a simulation of an agent's behavior or a security verdict.
-
-- Only tracked files named exactly `AGENTS.md` are instruction sources. Root-to-parent sources accumulate; nested instructions do not erase parent sources. Conflicts are not interpreted.
-- `AGENTS.md` files themselves appear under `instruction_changes`, not `affected_files`. Other tracked blob entries, including ordinary symlinks, are analyzed by their repository path. Submodule contents are not traversed.
-- `AGENTS.override.md`, `CLAUDE.md`, custom fallback filenames, home-directory guidance, includes, agent settings, and token/truncation limits are **not modeled**. The report is not a claim about the exact prompt Codex or another agent receives.
-- Instruction symlinks are rejected with exit 2 rather than followed or misread as text.
-- Instruction content is compared by Git blob ID. Mode-only changes to instruction files do not change context. Source files compare both mode and blob ID.
-- Added/deleted files with instructions have a context transition to/from an empty chain. Renames are deliberately reported as deletion plus addition, not guessed. Files changing content but keeping the same chain are omitted.
-- Empty instruction sources still count. Text diffs normalize line endings and omit end-of-file newline markers; the blob IDs remain authoritative for byte-level changes. Non-UTF-8 instruction text uses replacement characters for display. Filenames are JSON-escaped in reports.
-- Markdown source text is fenced, not interpreted. Reports can contain sensitive instruction content: review before publishing. No instruction command is executed.
-- Output is deterministic for the same commits and includes resolved commit IDs. JSON has `schema_version: 1`, instruction changes, affected files, and summary counts.
-
-### Exit codes
-
-| Code | Meaning |
-| --- | --- |
-| 0 | Report generated; default even when context changes |
-| 1 | With `--fail-on-change`, at least one instruction source/content changed |
-| 2 | Invalid arguments, unavailable revision, unsupported instruction entry, or Git/OS error |
-
-`--fail-on-change` also catches instruction edits in empty directories. Moving a source file between unchanged scopes is reported but does not trigger this instruction-edit gate.
-
-## CI integration
-
-Install a reviewed, pinned revision of this tool in your CI environment. Fetch both target commits, then:
+These are the fixture's real instruction blob IDs; only its variable commit header is omitted. Want to inspect the commits yourself?
 
 ```sh
-instruction-impact "$BASE_SHA" "$HEAD_SHA" --format markdown > instruction-impact.md
+python examples/demo.py --scenario override --write-repo /tmp/my-instruction-fixture
+git -C /tmp/my-instruction-fixture diff HEAD~1 HEAD
+instruction-impact HEAD~1 HEAD --repo /tmp/my-instruction-fixture --profile codex
 ```
 
-The command only generates a report; it does not post comments or request write permissions. Store the file as your CI artifact. Add `--fail-on-change` if your policy requires explicit review of instruction edits. Avoid `pull_request_target` workflows that execute untrusted PR code.
+`--write-repo` requires a new directory and never overwrites an existing fixture. Five scenarios are executable, and CI checks their JSON against independently stated expected paths and a formal schema:
 
-## Development
+| Scenario | Command suffix | Expected result |
+| --- | --- | --- |
+| Nested text edit | `--scenario nested` | Two unchanged descendants affected; sibling excluded |
+| New override | `--scenario override` | Two descendants switch from regular guidance to override |
+| Shadowed regular edit | `--scenario shadowed` | One visible instruction edit, zero file transitions |
+| Empty override | `--scenario empty-override` | Regular guidance disappears; root remains |
+| Custom fallback | `--scenario fallback` | Two descendants inherit a changed `TEAM.md` |
+
+## Use it on your repository
+
+Install directly from GitHub if you do not need the examples. **There is no PyPI publication yet.** Pin a reviewed commit for automation; an unpinned Git URL follows a moving branch.
 
 ```sh
-python -m pip install -e .
+python -m pip install "git+https://github.com/deploy103/instruction-impact.git"
+
+# Last committed change; HEAD is the default head argument.
+instruction-impact HEAD~1
+
+# A feature branch relative to its common ancestor with main.
+instruction-impact origin/main HEAD --merge-base --profile codex
+
+# Complete machine-readable data, even for large impact lists.
+instruction-impact origin/main HEAD --merge-base --format json > impact.json
+
+# Source-grouped review report with expandable before/after chains.
+instruction-impact origin/main HEAD --merge-base --format markdown > impact.md
+```
+
+Analysis never checks out either revision. Dirty worktrees and staged edits do not change the result; both revisions must already be in the local object database. Use `fetch-depth: 0` in CI, or explicitly fetch enough ancestry. `--merge-base` avoids misattributing unrelated target-branch changes to a PR. Comparing two tips without it is a deliberate tree-to-tree comparison.
+
+Text lists at most 20 file transitions by default. Markdown also caps each instruction's file list at 20 and labels omissions. `--max-files 100` increases the display cap; `--max-files 0` keeps summaries and instruction edits. **JSON is never truncated by this option.**
+
+### Choose the discovery profile deliberately
+
+| Behavior | `--profile agents` (default) | `--profile codex` |
+| --- | --- | --- |
+| Candidate names | `AGENTS.md` | `AGENTS.override.md`, `AGENTS.md`, then explicit fallbacks |
+| Files per directory | At most one `AGENTS.md` | First existing candidate only |
+| Empty source | Retained as source presence | Selected but contributes no text; no retry |
+| Parent guidance | Accumulates root-to-parent | Accumulates root-to-parent |
+| Override file under agents profile | Ordinary tracked file | Instruction candidate |
+
+For repositories configured with Codex fallback names:
+
+```sh
+instruction-impact main HEAD --profile codex \
+  --fallback TEAM_GUIDE.md --fallback .agents.md
+```
+
+Fallback order matters. Names are deduplicated and must be portable basenames, not paths. The tool does not read your home-directory Codex configuration; the command records its explicit candidate names in JSON.
+
+**An empty override is not equivalent to no override.** Codex selects filenames before skipping blank content. An empty `api/AGENTS.override.md` blocks `api/AGENTS.md` but leaves root instructions intact. This rule was checked against the upstream implementation, not inferred from the filename. See the [compatibility boundaries](docs/design.md#codex-compatibility-is-bounded).
+
+### Separate “an instruction was edited” from “existing scope changed”
+
+Both gates print the report before returning a nonzero result:
+
+```sh
+# Review every candidate edit, even if an override shadows it.
+instruction-impact main HEAD --profile codex --fail-on-change
+
+# Gate only when an existing file's contributing source chain changes.
+instruction-impact main HEAD --profile codex --fail-on-impact
+```
+
+| Situation | `--fail-on-change` | `--fail-on-impact` |
+| --- | --- | --- |
+| Edit selected guidance covering existing files | 1 | 1 |
+| Edit guidance shadowed by an unchanged override | 1 | 0 |
+| Add guidance in a directory with no covered files | 1 | 0 |
+| Add only a code file under unchanged guidance | 0 | 0 |
+| Delete an override and reactivate regular guidance | 1 | 1, if existing descendants change |
+
+The gates are mutually exclusive. Without a gate, successfully generated reports exit 0. Invalid arguments, missing revisions, unsupported instruction entries, and Git/OS errors exit 2. See `instruction-impact --help` for the full command surface.
+
+## GitHub Action: a report, not privileged PR automation
+
+The repository includes a composite Action that reads Git objects, creates Markdown and JSON reports, and appends the Markdown to the job summary. It does not install or execute the target repository, post comments, or require write permissions. It compares **merge-base to head** automatically.
+
+```yaml
+name: Review instruction impact
+on: pull_request
+permissions:
+  contents: read
+jobs:
+  impact:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - uses: deploy103/instruction-impact@main # Replace main with a reviewed full commit SHA.
+        id: impact
+        with:
+          base: ${{ github.event.pull_request.base.sha }}
+          head: ${{ github.event.pull_request.head.sha }}
+          profile: codex
+      - uses: actions/upload-artifact@v4
+        with:
+          name: instruction-impact
+          path: |
+            ${{ steps.impact.outputs.report-path }}
+            ${{ steps.impact.outputs.json-path }}
+```
+
+The Action also exposes `existing-files-affected` for your review policy. Its inputs are `base`, `head`, `repository` (default `.`), and `profile`; custom fallback lists are currently a CLI-only feature. Keep the tool revision trusted and pinned. Do not run untrusted PR code in a `pull_request_target` job. Reports can disclose instruction content—review the visibility of job summaries and artifacts before enabling them for a private project.
+
+## What this report does not prove
+
+- It **does not reconstruct a Codex prompt**. Home guidance, configured root markers, session CWD, byte truncation, agent settings, includes, and conversation instructions are outside the model.
+- It **does not resolve prose conflicts or detect prompt injection**. A changed source is a review signal, not a security finding.
+- It **does not follow instruction symlinks or traverse submodules**. Candidate symlinks are rejected rather than read incorrectly or followed outside the snapshot. Ordinary tracked symlinks are analyzed by path.
+- It **does not guess renames**. They are deletion/addition transitions. Instruction candidates themselves belong to the edit inventory, not the source-file transition list.
+- Its text diff is a **review aid, not an applyable patch**. Line endings are normalized; final-newline-only edits can have an empty diff. Full blob IDs remain authoritative.
+- It reads complete tracked-tree metadata and candidate instructions into memory. Display caps are not resource limits. No large-monorepo speed claim is made without measurements.
+
+These boundaries are deliberate. The useful promise is narrower: fixed commits and options produce deterministic, auditable evidence of instruction-source changes without running project code. The [design document](docs/design.md) explains selection, attribution, caching, and the trust boundary; the [JSON guide](docs/json.md) defines downstream integration.
+
+## Development and maintenance
+
+```sh
+python -m pip install -e '.[dev]'
 python -m unittest discover -s tests -v
+python tests/check_schema.py
+ruff check src tests examples
+ruff format --check src tests examples
 ```
 
-The tests create real temporary Git repositories and check nested boundaries, unchanged affected files, root inheritance, empty instructions, file moves, dirty worktree isolation, symlink rejection, unusual filenames, report fencing, and CLI exit codes. See [CONTRIBUTING.md](CONTRIBUTING.md).
+Regression tests use real temporary repositories, including divergent branches, nested prefix boundaries, empty overrides, shadowed edits, dirty indexes, unusual paths, and source changes with unchanged code. Schema checks exercise actual demo subprocess output. CI runs on Python 3.10, 3.12, and 3.14, and tests the composite Action's output paths and counts against an override fixture.
+
+The implementation keeps Git/discovery in `core.py`, presentation in `report.py`, and exit policies in `cli.py`. Runtime dependencies remain zero; optional development tools are not needed by users. Contributions should include a counterexample to a plausible wrong implementation, not just another successful invocation. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+Version 0.2 is an early, maintained scope auditor—not an established ecosystem standard. [CHANGELOG.md](CHANGELOG.md) records behavior and schema changes. Next work should be driven by real repositories: byte-budget modeling needs an explicit session model; staging/worktree support needs a separate snapshot contract. Neither is claimed today. MIT licensed; independent of OpenAI. Related-work research and program facts are recorded [separately](docs/research.md), without claims of unique invention or guaranteed grants.

@@ -9,10 +9,74 @@ jobs:
       matrix:
         python: ['3.10', '3.12', '3.14']
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
         with:
           python-version: ${{ matrix.python }}
+      - run: python -m pip install '.[dev]'
+      - run: python -m unittest discover -s tests -v
+      - run: python tests/check_schema.py
+      - run: instruction-impact --help
+      - name: Reproduce all documented scenarios
+        run: |
+          for scenario in nested override shadowed empty-override fallback; do
+            python examples/demo.py --scenario "$scenario" --format json
+          done
+  action:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
       - run: python -m pip install .
+      - name: Create override fixture
+        run: python examples/demo.py --scenario override --write-repo "$RUNNER_TEMP/fixture"
+      - uses: ./
+        id: impact
+        with:
+          repository: ${{ runner.temp }}/fixture
+          base: HEAD~1
+          head: HEAD
+          profile: codex
+      - name: Verify Action outputs
+        env:
+          JSON_PATH: ${{ steps.impact.outputs.json-path }}
+          COUNT: ${{ steps.impact.outputs.existing-files-affected }}
+        run: |
+          test "$COUNT" = 2
+          python -c 'import json,os; r=json.load(open(os.environ["JSON_PATH"])); assert [f["path"] for f in r["affected_files"]] == ["api/auth.py", "api/deep/model.py"]'
+      - uses: actions/upload-artifact@v4
+        with:
+          name: example-instruction-impact
+          path: |
+            ${{ steps.impact.outputs.report-path }}
+            ${{ steps.impact.outputs.json-path }}
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install ruff==0.15.6
+      - run: ruff check src tests examples
+      - run: ruff format --check src tests examples
+  package:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+      - uses: actions/setup-python@v6
+        with:
+          python-version: '3.12'
+      - run: python -m pip install build
+      - name: Verify scratch files never enter distributions
+        run: |
+          printf '/.amp/in/\n' >> "$(git rev-parse --git-path info/exclude)"
+          mkdir -p .amp/in
+          printf 'must not ship\n' > .amp/in/package-sentinel
+          python -m build
+          python -c 'import glob,tarfile; names=tarfile.open(glob.glob("dist/*.tar.gz")[0]).getnames(); assert not any("/.amp/in/" in n for n in names)'
+      - run: python -m pip install --force-reinstall dist/*.whl
       - run: python -m unittest discover -s tests -v
       - run: instruction-impact --help

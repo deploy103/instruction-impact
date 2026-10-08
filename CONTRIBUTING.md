@@ -16,6 +16,8 @@ ruff format --check src tests examples
 
 Python 3.10+ is supported. Git is required; tests use disposable repositories and `git init -b`. Use `ruff format src tests examples` to apply formatting. Development tooling is optional for users and must not become a runtime dependency.
 
+CI covers Ubuntu on Python 3.10/3.12/3.14 and Windows/macOS on Python 3.12. The Action's Bash execution test requires Python 3.11+; three tests of POSIX-only byte/control-character filenames do not run on Windows. These platform exclusions must not hide general analysis or gate regressions. Write fixture text as UTF-8/LF and keep symlink tests in Git's index so they do not require filesystem privileges. See [release readiness](docs/release.md) for distribution and compatibility checks.
+
 ## A useful bug report
 
 Include Python/Git versions, the exact command and profile, expected and actual affected paths, and a minimal two-commit fixture. `examples/demo.py --write-repo NEW_DIRECTORY` can help. Explain whether the discrepancy is an instruction edit, selection state, chain transition, or gate decision. These are separate contracts.

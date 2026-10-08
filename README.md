@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-0-blue)](pyproject.toml)
 
-**[한국어](README.ko.md)** · [Discovery model](docs/design.md) · [JSON contract](docs/json.md) · [Related work](docs/research.md)
+**[한국어](README.ko.md)** · [Discovery model](docs/design.md) · [JSON contract](docs/json.md) · [Troubleshooting](docs/troubleshooting.md) · [Release readiness](docs/release.md)
 
 **Git-native analysis · Codex-aware discovery · Source attribution · CI review gates · Versioned JSON**
 
@@ -41,7 +41,7 @@ The architecture is a local analysis pipeline, not a hosted application. There i
 | Packaging | `pyproject.toml`, Hatchling | Installable CLI, wheel, and source distribution |
 | Regression testing | `unittest`, real temporary Git repositories, `jsonschema` | Discovery semantics, CLI behavior, Action script, and report contracts |
 | Code quality | Ruff | Linting and formatting |
-| Compatibility CI | Python 3.10 / 3.12 / 3.14 on Ubuntu | Regression tests, demo contracts, Action integration, packaging checks |
+| Compatibility CI | Ubuntu: Python 3.10 / 3.12 / 3.14; Windows and macOS: Python 3.12 | Regression tests, demo contracts, Action integration, packaging checks |
 
 ### Processing architecture
 
@@ -111,8 +111,11 @@ python -m venv .venv
 . .venv/bin/activate
 python -m pip install .
 
+instruction-impact --version
 python examples/demo.py
 ```
+
+On Windows PowerShell, activation is `.venv\Scripts\Activate.ps1`. You can also run `.venv\Scripts\python -m pip install .` and `.venv\Scripts\python examples/demo.py` without activation. Prefer `--output-dir` to save UTF-8 artifacts without shell re-encoding.
 
 The demo creates two commits in a temporary repository. Only the nested instruction changes; both source files stay unchanged. It cleans up the fixture afterward. Its text report includes:
 
@@ -225,6 +228,18 @@ instruction-impact main HEAD --profile codex --fail-on-impact
 
 The gates are mutually exclusive. Without a gate, successfully generated reports exit 0. Invalid arguments, missing revisions, unsupported instruction entries, and Git/OS errors exit 2. See `instruction-impact --help` for the full command surface.
 
+### Use the Python API
+
+```python
+from instruction_impact import analyze, render_markdown
+
+report = analyze("/path/to/repo", "origin/main", "HEAD", profile="codex", merge_base=True)
+assert report["schema_version"] == 2
+print(render_markdown(report, max_files=30))
+```
+
+`analyze` returns the same report contract as CLI JSON; it does not enforce a gate or write files. Callers choose policy from the summary and handle `GitError`, `OSError`, or invalid-option `ValueError`. Human formatting is not a parsing API. See the [compatibility policy](docs/release.md#compatibility-policy).
+
 ## GitHub Action: a report, not privileged PR automation
 
 The repository includes a composite Action that reads Git objects, creates Markdown and JSON reports, and appends the Markdown to the job summary. It does not install or execute the target repository, post comments, or require write permissions. It compares **merge-base to head** automatically.
@@ -251,12 +266,14 @@ jobs:
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
           profile: codex
+          fail-on: impact # Omit or use none for report-only behavior.
           max-files: '30'
           # Optional: match your repository's configured fallback precedence.
           fallback: |
             TEAM_GUIDE.md
             .agents.md
-      - uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v7
+        if: ${{ always() && steps.impact.outputs.report-path != '' }}
         with:
           name: instruction-impact
           path: |
@@ -264,7 +281,9 @@ jobs:
             ${{ steps.impact.outputs.json-path }}
 ```
 
-The Action also exposes `existing-files-affected` for your review policy. It generates both artifacts from a single analysis; it does not fail on impact by itself. Its inputs are `base`, `head`, `repository` (default `.`), `profile`, `max-files` (default `20`), and `fallback` (one basename per line, in precedence order). Blank fallback lines are ignored; names are passed literally, including spaces. Nonempty fallbacks require the `codex` profile. Keep the tool revision trusted and pinned. Do not run untrusted PR code in a `pull_request_target` job. Reports can disclose instruction content—review the visibility of job summaries and artifacts before enabling them for a private project.
+The Action generates both artifacts from a single analysis. `fail-on` defaults to `none`; `change` requires review for any candidate instruction edit, and `impact` requires review only when existing file scope changes. A triggered gate fails the step **after** saving reports, outputs, and the job summary. The `always()` upload condition above retains evidence without converting a failed review into a successful job.
+
+Outputs are `report-path`, `json-path`, `existing-files-affected`, `instruction-changes`, and `gate-triggered` (`true`/`false`). Execution/configuration errors do not emit successful-report outputs. Other inputs are `base`, `head`, `repository` (default `.`), `profile`, `max-files` (default `20`), and `fallback` (one basename per line, in precedence order). Blank fallback lines are ignored; names are passed literally, including spaces. Nonempty fallbacks require the `codex` profile. Keep the tool revision trusted and pinned. Do not run untrusted PR code in a `pull_request_target` job. Reports can disclose instruction content—review the visibility of job summaries and artifacts before enabling them for a private project.
 
 ## What this report does not prove
 
@@ -302,13 +321,13 @@ ruff check src tests examples
 ruff format --check src tests examples
 ```
 
-Regression tests use real temporary repositories, including divergent branches, nested prefix boundaries, empty overrides, shadowed edits, dirty indexes, unusual paths, and source changes with unchanged code. Schema checks exercise actual demo subprocess output. CI runs on Python 3.10, 3.12, and 3.14, and tests the composite Action's output paths and counts against an override fixture.
+Regression tests use real temporary repositories, including divergent branches, nested prefix boundaries, empty overrides, shadowed edits, dirty indexes, unusual paths, and source changes with unchanged code. Schema checks exercise actual demo subprocess output. CI covers Ubuntu on Python 3.10, 3.12, and 3.14, plus Windows/macOS on Python 3.12. The Action requires Python 3.11+; its integration tests verify outputs even when a review gate fails. POSIX-only path tests are explicitly separated from Windows; symlink rejection needs no filesystem symlink privileges.
 
 The implementation keeps Git/discovery in `core.py`, presentation in `report.py`, and exit policies in `cli.py`. Runtime dependencies remain zero; optional development tools are not needed by users. Contributions should include a counterexample to a plausible wrong implementation, not just another successful invocation. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ### Direction and non-goals
 
-The 0.3 development line adds paired artifacts and configurable Action discovery without changing JSON schema version 2. This remains an early scope auditor—not an established ecosystem standard. [CHANGELOG.md](CHANGELOG.md) records behavior and schema changes.
+The source package targets **1.0.0**, with JSON schema version **2** unchanged. This is a bounded CLI/API/Action product, not an established ecosystem standard or a promise of exact agent behavior. [Release readiness](docs/release.md) defines acceptance and compatibility; [CHANGELOG.md](CHANGELOG.md) records changes. A source version is not a published release: no GitHub release or PyPI publication is implied.
 
 Future work should be driven by real repositories: byte-budget modeling needs an explicit session model; staging/worktree support needs a separate snapshot contract; monorepo performance claims need reproducible measurements. These are directions, not shipped capabilities. New discovery profiles require authoritative semantics and counterexample fixtures.
 

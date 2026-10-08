@@ -5,12 +5,18 @@ import json
 import sys
 from pathlib import Path
 
+from . import __version__
 from .core import GitError, analyze
 from .report import render_markdown, render_text
 
 
 def main(argv=None):
-    parser = argparse.ArgumentParser(description=__doc__)
+    # Redirected Windows streams may otherwise use a legacy encoding.
+    # Embedders can still supply StringIO or another text stream.
+    if hasattr(sys.stdout, "reconfigure"):
+        sys.stdout.reconfigure(encoding="utf-8", newline="\n")
+    parser = argparse.ArgumentParser(prog="instruction-impact", description=__doc__)
+    parser.add_argument("--version", action="version", version=f"instruction-impact {__version__}")
     parser.add_argument("base", help="base commit/ref")
     parser.add_argument("head", nargs="?", default="HEAD", help="head commit/ref (default: HEAD)")
     parser.add_argument("--repo", default=".", help="Git repository path")
@@ -70,8 +76,12 @@ def main(argv=None):
             json_report = json.dumps(report, indent=2, ensure_ascii=True) + "\n"
             markdown_report = render_markdown(report, args.max_files)
             args.output_dir.mkdir(parents=True, exist_ok=False)
-            (args.output_dir / "report.json").write_text(json_report, encoding="utf-8")
-            (args.output_dir / "report.md").write_text(markdown_report, encoding="utf-8")
+            (args.output_dir / "report.json").write_text(
+                json_report, encoding="utf-8", newline="\n"
+            )
+            (args.output_dir / "report.md").write_text(
+                markdown_report, encoding="utf-8", newline="\n"
+            )
     except (GitError, OSError, ValueError) as error:
         print(f"instruction-impact: {error}", file=sys.stderr)
         return 2

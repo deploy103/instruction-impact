@@ -1,5 +1,18 @@
 # Changelog
 
+## 1.0.0 — Unreleased
+
+- Add `--version` and a single source for CLI/API/distribution version metadata.
+- Add Action `fail-on: none|change|impact`, `instruction-changes`, and `gate-triggered`. Reports, outputs, and summary survive review failures; execution errors do not masquerade as successful reports.
+- Standardize CLI stdout and exported files as UTF-8/LF, including redirected Windows streams.
+- Fix Markdown export when instruction diff headers contain non-UTF-8 Git path bytes; JSON retains the original identity.
+- Exercise default, triggered, shadowed, and invalid Action policies; test I/O failure and legacy stdout encodings.
+- Expand compatibility CI to Windows and macOS, retaining the Ubuntu Python matrix. Construct symlink entries without requiring filesystem privileges; separate three POSIX-only filename tests.
+- Check wheel/sdist metadata with strict Twine validation, verify installed version agreement, rerun installed-wheel schema checks, and retain distribution artifacts without publishing them.
+- Document stable compatibility, release acceptance, Python integration, Windows setup, and troubleshooting. Update artifact uploads to Node-24-era `actions/upload-artifact@v7`.
+
+JSON schema version remains **2**, and default CLI discovery/Action report-only behavior are unchanged. This source version has not been published as a release or uploaded to PyPI.
+
 ## 0.3.0 — Unreleased
 
 - Add `--output-dir` to save complete JSON and capped Markdown from one analysis, including when a review gate returns exit 1. Existing destinations are never overwritten; I/O failures return exit 2 and may leave partial new bundles.

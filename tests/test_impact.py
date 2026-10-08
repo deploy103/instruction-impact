@@ -22,6 +22,7 @@ class ImpactTests(unittest.TestCase):
         self.git("config", "user.name", "Test")
         self.git("config", "user.email", "test@example.invalid")
         self.git("config", "commit.gpgsign", "false")
+        self.git("config", "core.autocrlf", "false")
 
     def git(self, *args):
         return (
@@ -33,7 +34,7 @@ class ImpactTests(unittest.TestCase):
     def write(self, path, text):
         target = self.repo / path
         target.parent.mkdir(parents=True, exist_ok=True)
-        target.write_text(text)
+        target.write_text(text, encoding="utf-8", newline="\n")
 
     def commit(self):
         self.git("add", "--all")
@@ -132,6 +133,7 @@ class ImpactTests(unittest.TestCase):
         self.assertEqual(analyze(self.repo, base, head), expected)
         self.assertEqual(analyze(self.repo / "api", base, head), expected)
 
+    @unittest.skipIf(os.name == "nt", "Windows filesystems forbid tabs and newlines in names")
     def test_arbitrary_filenames_and_fences_are_safe_in_reports(self):
         base = self.fixture()
         name = "api/한글\t`name\n.py"
@@ -161,10 +163,19 @@ class ImpactTests(unittest.TestCase):
 
     def test_symlink_instruction_rejected_without_reading_target(self):
         base = self.fixture()
-        (self.repo / "AGENTS.md").unlink()
-        os.symlink("/nonexistent/private-file", self.repo / "AGENTS.md")
+        blob = (
+            subprocess.check_output(
+                ["git", "-C", str(self.repo), "hash-object", "-w", "--stdin"],
+                input=b"/nonexistent/private-file",
+            )
+            .decode()
+            .strip()
+        )
+        # Build a committed symlink without needing filesystem symlink privileges.
+        self.git("update-index", "--cacheinfo", f"120000,{blob},AGENTS.md")
+        self.git("commit", "-m", "Instruction symlink")
         with self.assertRaisesRegex(GitError, "Unsupported instruction entry"):
-            analyze(self.repo, base, self.commit())
+            analyze(self.repo, base, "HEAD")
 
     def test_cli_json_and_exit_codes(self):
         base = self.fixture()
@@ -407,6 +418,63 @@ class ImpactTests(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertFalse(destination.exists())
 
+    def test_version_does_not_require_a_git_repository(self):
+        with tempfile.TemporaryDirectory() as outside:
+            result = subprocess.run(
+                [sys.executable, "-m", "instruction_impact", "--version"],
+                cwd=outside,
+                capture_output=True,
+            )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertEqual(result.stdout, b"instruction-impact 1.0.0\n")
+        self.assertEqual(result.stderr, b"")
+
+    def test_redirected_markdown_is_utf8_even_with_legacy_stdout_encoding(self):
+        base = self.fixture()
+        self.write("api/AGENTS.md", "검토하세요: café\n")
+        head = self.commit()
+        result = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "instruction_impact",
+                base,
+                head,
+                "--repo",
+                str(self.repo),
+                "--format",
+                "markdown",
+            ],
+            env={**os.environ, "PYTHONIOENCODING": "ascii"},
+            capture_output=True,
+        )
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertIn("검토하세요: café", result.stdout.decode("utf-8"))
+
+    def test_export_io_failure_returns_error_not_gate_result(self):
+        base = self.fixture()
+        self.write("api/AGENTS.md", "Changed rules\n")
+        head = self.commit()
+        destination = self.repo / "review"
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with patch.object(Path, "write_text", side_effect=OSError("disk full")):
+            with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+                result = main(
+                    [
+                        base,
+                        head,
+                        "--repo",
+                        str(self.repo),
+                        "--output-dir",
+                        str(destination),
+                        "--fail-on-impact",
+                    ]
+                )
+        self.assertEqual(result, 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("disk full", stderr.getvalue())
+        self.assertEqual(list(destination.iterdir()), [])
+
     @unittest.skipIf(sys.version_info < (3, 11), "The Action requires Python 3.11+ for -P")
     def test_action_script_writes_outputs_with_defaults_and_ordered_fallbacks(self):
         project = Path(__file__).resolve().parents[1]
@@ -416,16 +484,39 @@ class ImpactTests(unittest.TestCase):
         (self.repo / "api/AGENTS.md").unlink()
         self.write("api/TEAM GUIDE.md", "First fallback\n")
         self.write("api/--lower.md", "Lower priority\n")
+        self.write("api/BLOCKER.md", "Unchanged higher priority\n")
         self.write("instruction_impact.py", "raise RuntimeError('target code executed')\n")
         base = self.commit()
         self.write("api/TEAM GUIDE.md", "Updated fallback\n")
         self.write("api/--lower.md", "Shadowed edit\n")
         head = self.commit()
-        for profile, fallback, expected in (
-            ("agents", "", []),
-            ("codex", "\r\nTEAM GUIDE.md\r\n\r\n--lower.md", ["api/auth.py", "api/deep/model.py"]),
+        # BLOCKER is ordinary tracked content when it isn't in the candidate list.
+        paths = ["api/BLOCKER.md", "api/auth.py", "api/deep/model.py"]
+        custom = "\r\nTEAM GUIDE.md\r\n\r\n--lower.md"
+        shadowed = "BLOCKER.md\nTEAM GUIDE.md\n--lower.md"
+        for profile, fallback, policy, max_files, revision, expected, status in (
+            ("agents", "", "none", "0", base, [], 0),
+            ("agents", "", "impact", "0", base, [], 0),
+            ("codex", custom, "none", "0", base, paths, 0),
+            ("codex", custom, "impact", "0", base, paths, 1),
+            ("codex", custom, "change", "0", base, paths, 1),
+            ("codex", shadowed, "impact", "0", base, [], 0),
+            ("codex", shadowed, "change", "0", base, [], 1),
+            ("codex", custom, "invalid", "0", base, None, 2),
+            ("codex", custom, "none", "-1", base, None, 2),
+            ("codex", "bad/name.md", "none", "0", base, None, 2),
+            ("codex", custom, "impact", "0", "missing-ref", None, 2),
         ):
-            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as runner:
+            with (
+                self.subTest(
+                    profile=profile,
+                    fallback=fallback,
+                    policy=policy,
+                    max_files=max_files,
+                    revision=revision,
+                ),
+                tempfile.TemporaryDirectory() as runner,
+            ):
                 output = Path(runner) / "outputs"
                 summary = Path(runner) / "summary"
                 env = {
@@ -435,25 +526,33 @@ class ImpactTests(unittest.TestCase):
                     "RUNNER_TEMP": runner,
                     "GITHUB_OUTPUT": str(output),
                     "GITHUB_STEP_SUMMARY": str(summary),
-                    "INPUT_BASE": base,
+                    "INPUT_BASE": revision,
                     "INPUT_HEAD": head,
                     "INPUT_REPOSITORY": str(self.repo),
                     "INPUT_PROFILE": profile,
                     "INPUT_FALLBACK": fallback,
-                    "INPUT_MAX_FILES": "0",
+                    "INPUT_MAX_FILES": max_files,
+                    "INPUT_FAIL_ON": policy,
                 }
                 result = subprocess.run(
                     ["bash", "-c", script], cwd=self.repo, env=env, capture_output=True, text=True
                 )
-                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertEqual(result.returncode, status, result.stderr)
+                if expected is None:
+                    self.assertFalse(output.exists())
+                    self.assertFalse(summary.exists())
+                    self.assertIn("instruction-impact:", result.stderr)
+                    continue
                 outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
-                report = json.loads(Path(outputs["json-path"]).read_text())
+                report = json.loads(Path(outputs["json-path"]).read_text(encoding="utf-8"))
                 self.assertEqual([item["path"] for item in report["affected_files"]], expected)
                 self.assertEqual(outputs["existing-files-affected"], str(len(expected)))
-                markdown = Path(outputs["report-path"]).read_text()
-                self.assertEqual(summary.read_text(), markdown)
+                self.assertEqual(outputs["gate-triggered"], "true" if status == 1 else "false")
+                self.assertEqual(outputs["instruction-changes"], "2" if profile == "codex" else "0")
+                markdown = Path(outputs["report-path"]).read_text(encoding="utf-8")
+                self.assertEqual(summary.read_text(encoding="utf-8"), markdown)
                 self.assertEqual(markdown, render_markdown(report, 0))
-                if profile == "codex":
+                if fallback == custom:
                     self.assertEqual(
                         report["instruction_names"],
                         ["AGENTS.override.md", "AGENTS.md", "TEAM GUIDE.md", "--lower.md"],
@@ -477,6 +576,7 @@ class ImpactTests(unittest.TestCase):
             report["affected_files"][0]["before"], report["affected_files"][0]["after"]
         )
 
+    @unittest.skipIf(os.name == "nt", "Non-UTF-8 byte filenames are a POSIX filesystem feature")
     def test_non_utf8_filenames_round_trip_through_json(self):
         self.fixture()
         raw = os.fsencode(self.repo) + b"/api/\xff.py"
@@ -489,6 +589,37 @@ class ImpactTests(unittest.TestCase):
         paths = [os.fsencode(item["path"]) for item in decoded["affected_files"]]
         self.assertIn(b"api/\xff.py", paths)
         self.assertIn(r"\udcff.py", render_markdown(report))
+
+    @unittest.skipIf(os.name == "nt", "Non-UTF-8 byte filenames are a POSIX filesystem feature")
+    def test_non_utf8_instruction_directory_exports_valid_utf8_markdown(self):
+        self.fixture()
+        directory = "api/" + os.fsdecode(b"\xff")
+        self.write(directory + "/AGENTS.md", "Old guidance\n")
+        self.write(directory + "/module.py", "unchanged\n")
+        base = self.commit()
+        self.write(directory + "/AGENTS.md", "New guidance\n")
+        head = self.commit()
+        destination = self.repo / "review"
+        stdout = io.StringIO()
+        with contextlib.redirect_stdout(stdout):
+            result = main(
+                [
+                    base,
+                    head,
+                    "--repo",
+                    str(self.repo),
+                    "--output-dir",
+                    str(destination),
+                    "--format",
+                    "markdown",
+                ]
+            )
+        self.assertEqual(result, 0)
+        markdown = (destination / "report.md").read_bytes().decode("utf-8")
+        self.assertEqual(markdown, stdout.getvalue())
+        self.assertIn(r"base/api/\udcff/AGENTS.md", markdown)
+        report = json.loads((destination / "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(os.fsencode(report["affected_files"][0]["path"]), b"api/\xff/module.py")
 
     def test_sha256_repository_uses_full_object_ids(self):
         self.repo = self.repo / "sha256"

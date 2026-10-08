@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "instruction-impact"
-version = "0.3.0"
+dynamic = ["version"]
 description = "Review the file-level blast radius of AGENTS.md changes between Git commits."
 readme = "README.md"
 requires-python = ">=3.10"
@@ -21,6 +21,9 @@ instruction-impact = "instruction_impact:main"
 [project.urls]
 Repository = "https://github.com/deploy103/instruction-impact"
 Issues = "https://github.com/deploy103/instruction-impact/issues"
+
+[tool.hatch.version]
+path = "src/instruction_impact/__init__.py"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/instruction_impact"]

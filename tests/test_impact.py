@@ -407,6 +407,7 @@ class ImpactTests(unittest.TestCase):
         self.assertEqual(result, 2)
         self.assertFalse(destination.exists())
 
+    @unittest.skipIf(sys.version_info < (3, 11), "The Action requires Python 3.11+ for -P")
     def test_action_script_writes_outputs_with_defaults_and_ordered_fallbacks(self):
         project = Path(__file__).resolve().parents[1]
         # Execute the actual single Bash block, without a YAML runtime dependency.
@@ -441,9 +442,10 @@ class ImpactTests(unittest.TestCase):
                     "INPUT_FALLBACK": fallback,
                     "INPUT_MAX_FILES": "0",
                 }
-                subprocess.run(
-                    ["bash", "-c", script], cwd=self.repo, env=env, check=True, capture_output=True
+                result = subprocess.run(
+                    ["bash", "-c", script], cwd=self.repo, env=env, capture_output=True, text=True
                 )
+                self.assertEqual(result.returncode, 0, result.stderr)
                 outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
                 report = json.loads(Path(outputs["json-path"]).read_text())
                 self.assertEqual([item["path"] for item in report["affected_files"]], expected)

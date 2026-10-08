@@ -2,6 +2,7 @@ import contextlib
 import io
 import json
 import os
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -490,6 +491,10 @@ class ImpactTests(unittest.TestCase):
         project = Path(__file__).resolve().parents[1]
         # Execute the actual single Bash block, without a YAML runtime dependency.
         script = textwrap.dedent((project / "action.yml").read_text().split("      run: |\n", 1)[1])
+        bash = "bash"
+        if os.name == "nt":
+            # Windows' system Bash is a WSL launcher, not GitHub's Git Bash.
+            bash = str(Path(shutil.which("git")).resolve().parents[1] / "bin/bash.exe")
         self.fixture()
         (self.repo / "api/AGENTS.md").unlink()
         self.write("api/TEAM GUIDE.md", "First fallback\n")
@@ -545,7 +550,7 @@ class ImpactTests(unittest.TestCase):
                     "INPUT_FAIL_ON": policy,
                 }
                 result = subprocess.run(
-                    ["bash", "-s"],
+                    [bash, "-s"],
                     input=script,
                     cwd=self.repo,
                     env=env,

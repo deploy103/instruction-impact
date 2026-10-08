@@ -7,7 +7,7 @@
 - Standardize CLI stdout and exported files as UTF-8/LF, including redirected Windows streams.
 - Fix Markdown export when instruction diff headers contain non-UTF-8 Git path bytes; JSON retains the original identity.
 - Exercise default, triggered, shadowed, and invalid Action policies; test I/O failure and legacy stdout encodings.
-- Expand compatibility CI to Windows and macOS, retaining the Ubuntu Python matrix. Construct symlink entries without requiring filesystem privileges; separate three POSIX-only filename tests.
+- Expand compatibility CI to Windows and macOS, retaining the Ubuntu Python matrix. Construct symlink and non-UTF-8 path entries without requiring filesystem support; separate the POSIX-only control-character filename test. Keep Action arguments compatible with macOS's Bash 3.2.
 - Check wheel/sdist metadata with strict Twine validation, verify installed version agreement, rerun installed-wheel schema checks, and retain distribution artifacts without publishing them.
 - Document stable compatibility, release acceptance, Python integration, Windows setup, and troubleshooting. Update artifact uploads to Node-24-era `actions/upload-artifact@v7`.
 

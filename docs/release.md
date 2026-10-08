@@ -20,7 +20,7 @@ Before publishing a release, verify all of these on its exact commit:
 | Distribution | Wheel and sdist build, strict Twine metadata check, no scratch artifacts, version agreement, and installed-wheel regressions/schema checks |
 | Documentation | English and Korean usage, trust boundary, compatibility, troubleshooting, and contribution instructions match tested behavior |
 
-The Action requires Bash and Python 3.11+ because `-P` keeps target code off Python's import path. The CLI and analysis API continue to support Python 3.10+. On Windows, three byte/control-character filename tests are inapplicable to its filesystem; symlink rejection is still tested by constructing a Git index entry, without requiring symlink privileges.
+The Action requires Bash and Python 3.11+ because `-P` keeps target code off Python's import path. The CLI and analysis API continue to support Python 3.10+. On Windows, only the filesystem test of tab/newline filenames is excluded. Non-UTF-8 Git paths and symlink rejection are tested through Git index entries on all platforms, without requiring filesystem support or symlink privileges. The Action avoids empty-array expansion under `set -u` for compatibility with macOS's Bash 3.2.
 
 ## Local release verification
 

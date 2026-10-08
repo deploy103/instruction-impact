@@ -36,6 +36,16 @@ class ImpactTests(unittest.TestCase):
         target.parent.mkdir(parents=True, exist_ok=True)
         target.write_text(text, encoding="utf-8", newline="\n")
 
+    def write_index(self, path, content):
+        blob = subprocess.check_output(
+            ["git", "-C", str(self.repo), "hash-object", "-w", "--stdin"], input=content
+        ).strip()
+        subprocess.run(
+            ["git", "-C", str(self.repo), "update-index", "-z", "--index-info"],
+            input=b"100644 " + blob + b"\t" + path + b"\0",
+            check=True,
+        )
+
     def commit(self):
         self.git("add", "--all")
         self.git("commit", "--allow-empty", "-m", "fixture")
@@ -522,28 +532,36 @@ class ImpactTests(unittest.TestCase):
                 env = {
                     **os.environ,
                     "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
-                    "GITHUB_ACTION_PATH": str(project),
-                    "RUNNER_TEMP": runner,
-                    "GITHUB_OUTPUT": str(output),
-                    "GITHUB_STEP_SUMMARY": str(summary),
+                    "GITHUB_ACTION_PATH": project.as_posix(),
+                    "RUNNER_TEMP": Path(runner).as_posix(),
+                    "GITHUB_OUTPUT": output.as_posix(),
+                    "GITHUB_STEP_SUMMARY": summary.as_posix(),
                     "INPUT_BASE": revision,
                     "INPUT_HEAD": head,
-                    "INPUT_REPOSITORY": str(self.repo),
+                    "INPUT_REPOSITORY": self.repo.as_posix(),
                     "INPUT_PROFILE": profile,
                     "INPUT_FALLBACK": fallback,
                     "INPUT_MAX_FILES": max_files,
                     "INPUT_FAIL_ON": policy,
                 }
                 result = subprocess.run(
-                    ["bash", "-c", script], cwd=self.repo, env=env, capture_output=True, text=True
+                    ["bash", "-s"],
+                    input=script,
+                    cwd=self.repo,
+                    env=env,
+                    capture_output=True,
+                    text=True,
                 )
-                self.assertEqual(result.returncode, status, result.stderr)
+                self.assertEqual(result.returncode, status, result.stdout + result.stderr)
                 if expected is None:
                     self.assertFalse(output.exists())
                     self.assertFalse(summary.exists())
                     self.assertIn("instruction-impact:", result.stderr)
                     continue
-                outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                self.assertTrue(output.exists(), result.stdout + result.stderr)
+                outputs = dict(
+                    line.split("=", 1) for line in output.read_text(encoding="utf-8").splitlines()
+                )
                 report = json.loads(Path(outputs["json-path"]).read_text(encoding="utf-8"))
                 self.assertEqual([item["path"] for item in report["affected_files"]], expected)
                 self.assertEqual(outputs["existing-files-affected"], str(len(expected)))
@@ -576,29 +594,31 @@ class ImpactTests(unittest.TestCase):
             report["affected_files"][0]["before"], report["affected_files"][0]["after"]
         )
 
-    @unittest.skipIf(os.name == "nt", "Non-UTF-8 byte filenames are a POSIX filesystem feature")
     def test_non_utf8_filenames_round_trip_through_json(self):
         self.fixture()
-        raw = os.fsencode(self.repo) + b"/api/\xff.py"
-        with open(raw, "wb") as file:
-            file.write(b"unchanged\n")
-        base = self.commit()
-        self.write("api/AGENTS.md", "Updated\n")
-        report = analyze(self.repo, base, self.commit())
+        # Git trees accept raw path bytes even when the host filesystem does not.
+        self.write_index(b"api/\xff.py", b"unchanged\n")
+        self.git("commit", "-m", "Raw filename")
+        base = self.git("rev-parse", "HEAD")
+        self.write_index(b"api/AGENTS.md", b"Updated\n")
+        self.git("commit", "-m", "Updated guidance")
+        report = analyze(self.repo, base, "HEAD")
         decoded = json.loads(json.dumps(report))
-        paths = [os.fsencode(item["path"]) for item in decoded["affected_files"]]
+        paths = [
+            item["path"].encode("utf-8", "surrogateescape") for item in decoded["affected_files"]
+        ]
         self.assertIn(b"api/\xff.py", paths)
         self.assertIn(r"\udcff.py", render_markdown(report))
 
-    @unittest.skipIf(os.name == "nt", "Non-UTF-8 byte filenames are a POSIX filesystem feature")
     def test_non_utf8_instruction_directory_exports_valid_utf8_markdown(self):
         self.fixture()
-        directory = "api/" + os.fsdecode(b"\xff")
-        self.write(directory + "/AGENTS.md", "Old guidance\n")
-        self.write(directory + "/module.py", "unchanged\n")
-        base = self.commit()
-        self.write(directory + "/AGENTS.md", "New guidance\n")
-        head = self.commit()
+        self.write_index(b"api/\xff/AGENTS.md", b"Old guidance\n")
+        self.write_index(b"api/\xff/module.py", b"unchanged\n")
+        self.git("commit", "-m", "Raw instruction directory")
+        base = self.git("rev-parse", "HEAD")
+        self.write_index(b"api/\xff/AGENTS.md", b"New guidance\n")
+        self.git("commit", "-m", "Updated guidance")
+        head = self.git("rev-parse", "HEAD")
         destination = self.repo / "review"
         stdout = io.StringIO()
         with contextlib.redirect_stdout(stdout):
@@ -619,7 +639,10 @@ class ImpactTests(unittest.TestCase):
         self.assertEqual(markdown, stdout.getvalue())
         self.assertIn(r"base/api/\udcff/AGENTS.md", markdown)
         report = json.loads((destination / "report.json").read_text(encoding="utf-8"))
-        self.assertEqual(os.fsencode(report["affected_files"][0]["path"]), b"api/\xff/module.py")
+        self.assertEqual(
+            report["affected_files"][0]["path"].encode("utf-8", "surrogateescape"),
+            b"api/\xff/module.py",
+        )
 
     def test_sha256_repository_uses_full_object_ids(self):
         self.repo = self.repo / "sha256"

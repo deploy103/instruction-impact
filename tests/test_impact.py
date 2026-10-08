@@ -494,7 +494,14 @@ class ImpactTests(unittest.TestCase):
         bash = "bash"
         if os.name == "nt":
             # Windows' system Bash is a WSL launcher, not GitHub's Git Bash.
-            bash = str(Path(shutil.which("git")).resolve().parents[1] / "bin/bash.exe")
+            # Git can be on PATH from bin, cmd, or mingw64/bin.
+            bash = str(
+                next(
+                    parent / "bin/bash.exe"
+                    for parent in Path(shutil.which("git")).resolve().parents
+                    if (parent / "bin/bash.exe").is_file()
+                )
+            )
         self.fixture()
         (self.repo / "api/AGENTS.md").unlink()
         self.write("api/TEAM GUIDE.md", "First fallback\n")

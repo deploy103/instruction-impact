@@ -1,6 +1,6 @@
 # Analysis model and trust boundary
 
-This document is the behavior contract for 0.2. It separates **instruction edits**, **selection**, and **file context transitions**. These are different facts; treating them as synonyms creates misleading CI results.
+This document is the analysis behavior contract for 0.2 and 0.3. It separates **instruction edits**, **selection**, and **file context transitions**. These are different facts; treating them as synonyms creates misleading CI results.
 
 ## Three questions, three answers
 
@@ -81,3 +81,9 @@ Fallbacks must be portable basename strings; `/`, `\`, `:`, NUL, empty names, `.
 Paths are JSON-escaped in human reports. Markdown diff/content blocks use a fence longer than every backtick run in their input, so instruction text cannot close the block. Raw report JSON preserves full paths; callers must still escape values when rendering them elsewhere. Reports may contain private instructions or secrets. Generating an artifact or job summary is itself a disclosure decision.
 
 Git remains an external executable with the local user's Git configuration and object database. The tool is not a sandbox for malicious Git implementations, hostile global Git settings, arbitrary resource exhaustion, or a compromised runner. The composite Action keeps target repository code off Python's import path and uses `python -P` to prevent current-directory imports; it does not install or execute target code.
+
+## Paired artifacts and Action configuration
+
+`--output-dir` renders JSON and Markdown from one in-memory analysis, then creates a new destination directory. Existing directories and symlinks are refused, so a rerun cannot silently replace previous evidence. Both files use UTF-8. Parent directories are created as needed; this does not change snapshot analysis. The files are saved before evaluating review gates. Export failures return exit 2, not the gate result; writes are not transactional and can leave partial new bundles.
+
+The Action invokes this path once with merge-base comparison. Its newline-separated `fallback` input preserves order, ignores empty lines, and strips CRLF line endings without splitting spaces in basenames. A Bash argument array passes names literally through `--fallback=NAME`, including names beginning with a dash. Input values never become shell source. The core's basename/profile validation still applies. `max-files` controls only human presentation. Outputs and job summaries are emitted only after successful export; impact policy remains the caller's responsibility.

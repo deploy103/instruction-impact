@@ -3,7 +3,9 @@ import io
 import json
 import os
 import subprocess
+import sys
 import tempfile
+import textwrap
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -344,6 +346,121 @@ class ImpactTests(unittest.TestCase):
         head = self.commit()
         with contextlib.redirect_stdout(io.StringIO()):
             self.assertEqual(main([base, head, "--repo", str(self.repo), "--fail-on-impact"]), 1)
+
+    def test_report_bundle_uses_one_analysis_and_survives_impact_gate(self):
+        base = self.fixture()
+        self.write("api/AGENTS.md", "Review changes in Korean: 검토하세요.\n")
+        head = self.commit()
+        destination = self.repo / "artifacts" / "review"
+        stdout = io.StringIO()
+        with patch("instruction_impact.cli.analyze", wraps=analyze) as calls:
+            with contextlib.redirect_stdout(stdout):
+                result = main(
+                    [
+                        base,
+                        head,
+                        "--repo",
+                        str(self.repo),
+                        "--output-dir",
+                        str(destination),
+                        "--format",
+                        "json",
+                        "--max-files",
+                        "0",
+                        "--fail-on-impact",
+                    ]
+                )
+        calls.assert_called_once()
+        self.assertEqual(result, 1)
+        report = json.loads((destination / "report.json").read_text(encoding="utf-8"))
+        self.assertEqual(report, json.loads(stdout.getvalue()))
+        self.assertEqual(
+            [item["path"] for item in report["affected_files"]],
+            ["api/auth.py", "api/deep/model.py"],
+        )
+        markdown = (destination / "report.md").read_text(encoding="utf-8")
+        self.assertEqual(markdown, render_markdown(report, 0))
+        self.assertIn("검토하세요", markdown)
+        self.assertNotIn('"api/auth.py"', markdown)
+
+    def test_report_bundle_refuses_existing_directory_without_modifying_files(self):
+        base = self.fixture()
+        destination = self.repo / "review"
+        destination.mkdir()
+        (destination / "report.json").write_bytes(b"keep private report\n")
+        stdout, stderr = io.StringIO(), io.StringIO()
+        with contextlib.redirect_stdout(stdout), contextlib.redirect_stderr(stderr):
+            result = main([base, "--repo", str(self.repo), "--output-dir", str(destination)])
+        self.assertEqual(result, 2)
+        self.assertEqual(stdout.getvalue(), "")
+        self.assertIn("instruction-impact:", stderr.getvalue())
+        self.assertEqual((destination / "report.json").read_bytes(), b"keep private report\n")
+        self.assertFalse((destination / "report.md").exists())
+
+    def test_invalid_revision_does_not_create_report_bundle(self):
+        self.fixture()
+        destination = self.repo / "review"
+        with contextlib.redirect_stderr(io.StringIO()):
+            result = main(
+                ["missing-ref", "--repo", str(self.repo), "--output-dir", str(destination)]
+            )
+        self.assertEqual(result, 2)
+        self.assertFalse(destination.exists())
+
+    @unittest.skipIf(sys.version_info < (3, 11), "The Action requires Python 3.11+ for -P")
+    def test_action_script_writes_outputs_with_defaults_and_ordered_fallbacks(self):
+        project = Path(__file__).resolve().parents[1]
+        # Execute the actual single Bash block, without a YAML runtime dependency.
+        script = textwrap.dedent((project / "action.yml").read_text().split("      run: |\n", 1)[1])
+        self.fixture()
+        (self.repo / "api/AGENTS.md").unlink()
+        self.write("api/TEAM GUIDE.md", "First fallback\n")
+        self.write("api/--lower.md", "Lower priority\n")
+        self.write("instruction_impact.py", "raise RuntimeError('target code executed')\n")
+        base = self.commit()
+        self.write("api/TEAM GUIDE.md", "Updated fallback\n")
+        self.write("api/--lower.md", "Shadowed edit\n")
+        head = self.commit()
+        for profile, fallback, expected in (
+            ("agents", "", []),
+            ("codex", "\r\nTEAM GUIDE.md\r\n\r\n--lower.md", ["api/auth.py", "api/deep/model.py"]),
+        ):
+            with self.subTest(profile=profile), tempfile.TemporaryDirectory() as runner:
+                output = Path(runner) / "outputs"
+                summary = Path(runner) / "summary"
+                env = {
+                    **os.environ,
+                    "PATH": str(Path(sys.executable).parent) + os.pathsep + os.environ["PATH"],
+                    "GITHUB_ACTION_PATH": str(project),
+                    "RUNNER_TEMP": runner,
+                    "GITHUB_OUTPUT": str(output),
+                    "GITHUB_STEP_SUMMARY": str(summary),
+                    "INPUT_BASE": base,
+                    "INPUT_HEAD": head,
+                    "INPUT_REPOSITORY": str(self.repo),
+                    "INPUT_PROFILE": profile,
+                    "INPUT_FALLBACK": fallback,
+                    "INPUT_MAX_FILES": "0",
+                }
+                result = subprocess.run(
+                    ["bash", "-c", script], cwd=self.repo, env=env, capture_output=True, text=True
+                )
+                self.assertEqual(result.returncode, 0, result.stderr)
+                outputs = dict(line.split("=", 1) for line in output.read_text().splitlines())
+                report = json.loads(Path(outputs["json-path"]).read_text())
+                self.assertEqual([item["path"] for item in report["affected_files"]], expected)
+                self.assertEqual(outputs["existing-files-affected"], str(len(expected)))
+                markdown = Path(outputs["report-path"]).read_text()
+                self.assertEqual(summary.read_text(), markdown)
+                self.assertEqual(markdown, render_markdown(report, 0))
+                if profile == "codex":
+                    self.assertEqual(
+                        report["instruction_names"],
+                        ["AGENTS.override.md", "AGENTS.md", "TEAM GUIDE.md", "--lower.md"],
+                    )
+                    self.assertEqual(
+                        report["affected_files"][0]["after"][-1]["path"], "api/TEAM GUIDE.md"
+                    )
 
     def test_lossy_text_display_does_not_hide_byte_level_instruction_changes(self):
         self.fixture()

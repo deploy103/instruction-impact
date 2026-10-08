@@ -13,6 +13,12 @@ inputs:
   profile:
     description: Discovery profile, agents or codex
     default: agents
+  fallback:
+    description: Codex fallback basenames, one per line in precedence order (blank lines ignored)
+    default: ''
+  max-files:
+    description: Human report file display cap; JSON remains complete
+    default: '20'
 outputs:
   report-path:
     description: Absolute path of the Markdown report
@@ -33,16 +39,23 @@ runs:
         INPUT_HEAD: ${{ inputs.head }}
         INPUT_REPOSITORY: ${{ inputs.repository }}
         INPUT_PROFILE: ${{ inputs.profile }}
+        INPUT_FALLBACK: ${{ inputs.fallback }}
+        INPUT_MAX_FILES: ${{ inputs.max-files }}
       run: |
         set -euo pipefail
         export PYTHONPATH="$GITHUB_ACTION_PATH/src"
-        output=$(mktemp -d "$RUNNER_TEMP/instruction-impact.XXXXXX")
+        output=$(mktemp -d "$RUNNER_TEMP/instruction-impact.XXXXXX")/reports
+        fallbacks=()
+        while IFS= read -r name || [[ -n "$name" ]]; do
+          name=${name%$'\r'}
+          if [[ -n "$name" ]]; then
+            fallbacks+=("--fallback=$name")
+          fi
+        done <<< "$INPUT_FALLBACK"
         python -P -m instruction_impact "$INPUT_BASE" "$INPUT_HEAD" \
           --repo "$INPUT_REPOSITORY" --profile "$INPUT_PROFILE" --merge-base \
-          --format markdown > "$output/report.md"
-        python -P -m instruction_impact "$INPUT_BASE" "$INPUT_HEAD" \
-          --repo "$INPUT_REPOSITORY" --profile "$INPUT_PROFILE" --merge-base \
-          --format json > "$output/report.json"
+          "${fallbacks[@]}" --max-files "$INPUT_MAX_FILES" \
+          --output-dir "$output" --format json > /dev/null
         echo "report-path=$output/report.md" >> "$GITHUB_OUTPUT"
         echo "json-path=$output/report.json" >> "$GITHUB_OUTPUT"
         count=$(python -P -c 'import json,sys; print(json.load(open(sys.argv[1]))["summary"]["existing_files_affected"])' "$output/report.json")

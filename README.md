@@ -1,15 +1,76 @@
-# instruction-impact
+# instruction-impact · Agent Instruction Change Intelligence
 
-### Review the instructions that changed—not just the code that changed.
+### Turn an instruction diff into an auditable, file-level impact report.
 
 [![Tests](https://github.com/deploy103/instruction-impact/actions/workflows/test.yml/badge.svg)](https://github.com/deploy103/instruction-impact/actions/workflows/test.yml)
+[![Python](https://img.shields.io/badge/python-3.10%2B-3776AB?logo=python&logoColor=white)](pyproject.toml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
+[![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-0-blue)](pyproject.toml)
+
 **[한국어](README.ko.md)** · [Discovery model](docs/design.md) · [JSON contract](docs/json.md) · [Related work](docs/research.md)
+
+**Git-native analysis · Codex-aware discovery · Source attribution · CI review gates · Versioned JSON**
 
 A pull request changes `services/payments/AGENTS.md` from “run unit tests” to “skip tests for generated changes.” Git shows one Markdown edit. The review question is larger: **which files will now inherit that guidance, including files nobody touched?**
 
 `instruction-impact` answers that question from two committed Git trees. It reports instruction edits, determines which sources contribute in each directory, and identifies every tracked file whose ordered instruction-source chain differs. It needs **Git and Python—not an AI model, API key, database, or session recorder.**
 
 This is a review aid for teams maintaining agent guidance in nested repositories. It is not a linter for prose, an agent framework, or a claim that a particular agent actually read these files.
+
+## Built for instruction-aware code review
+
+| Workflow | What you get |
+| --- | --- |
+| Review a monorepo guidance change | Exact descendant paths, including unchanged code, with root-to-directory provenance |
+| Audit an override rollout | Selected, shadowed, and empty-source states—not just filename matches |
+| Integrate with a PR pipeline | Merge-base comparison, Markdown job summary, complete JSON, and a count for your policy |
+| Build downstream tooling | Schema-versioned data and full Git object IDs without an AI service |
+| Retain review evidence | A paired JSON/Markdown bundle generated from one analysis |
+
+## Technology stack
+
+The architecture is a local analysis pipeline, not a hosted application. There is no frontend framework, database, queue, or model provider to deploy.
+
+| Layer | Technology | Responsibility |
+| --- | --- | --- |
+| Runtime | Python 3.10+, standard library | CLI, source selection, chain comparison, report rendering |
+| Repository access | Git CLI (`rev-parse`, `merge-base`, `ls-tree`, `cat-file`) | Read committed metadata and instruction blobs without checkout |
+| Interfaces | `argparse`, Python API, JSON, Markdown | Interactive use, automation, and review artifacts |
+| Data contract | JSON Schema Draft 2020-12 | Validate schema-version-2 reports; no schema-library runtime dependency |
+| CI integration | GitHub Actions composite action, Bash | Read-only PR reports and job summaries |
+| Packaging | `pyproject.toml`, Hatchling | Installable CLI, wheel, and source distribution |
+| Regression testing | `unittest`, real temporary Git repositories, `jsonschema` | Discovery semantics, CLI behavior, Action script, and report contracts |
+| Code quality | Ruff | Linting and formatting |
+| Compatibility CI | Python 3.10 / 3.12 / 3.14 on Ubuntu | Regression tests, demo contracts, Action integration, packaging checks |
+
+### Processing architecture
+
+```text
+ Base ref + Head ref + Discovery profile
+                    |
+                    v
+     Resolve commits / optional merge-base
+                    |
+                    v
+     Read Git trees + unique instruction blobs
+                    |
+                    v
+     Select contributing sources per directory
+                    |
+                    v
+     Compare ordered chains + attribute changes
+                    |
+          +---------+---------+
+          |                   |
+          v                   v
+   Text / Markdown     Schema-versioned JSON
+          |                   |
+          +---------+---------+
+                    v
+       CLI gates / paired artifacts / CI summary
+```
+
+Both snapshots are resolved once per analysis. Blob reads and ancestor chains are cached; ordinary source-code contents are not loaded or executed. Full object IDs—not rendered text—determine identity. The human report can be capped without losing machine-readable evidence.
 
 ## What an ordinary diff misses
 
@@ -109,7 +170,13 @@ instruction-impact origin/main HEAD --merge-base --format json > impact.json
 
 # Source-grouped review report with expandable before/after chains.
 instruction-impact origin/main HEAD --merge-base --format markdown > impact.md
+
+# Paired artifacts from one analysis; the destination must not already exist.
+instruction-impact origin/main HEAD --merge-base --profile codex \
+  --output-dir review-artifacts/pr-123 --fail-on-impact
 ```
+
+`--output-dir` writes UTF-8 `report.json` and `report.md`, while `--format` still controls stdout. The bundle is saved before an instruction/impact gate returns exit 1, so a blocked review retains its evidence. Existing directories are refused with exit 2 rather than overwritten. Parent directories are created as needed. Writes are not transactional: an I/O failure can leave a partial new bundle; use a fresh destination after resolving the error. Reports may contain private instruction text.
 
 Analysis never checks out either revision. Dirty worktrees and staged edits do not change the result; both revisions must already be in the local object database. Use `fetch-depth: 0` in CI, or explicitly fetch enough ancestry. `--merge-base` avoids misattributing unrelated target-branch changes to a PR. Comparing two tips without it is a deliberate tree-to-tree comparison.
 
@@ -184,6 +251,11 @@ jobs:
           base: ${{ github.event.pull_request.base.sha }}
           head: ${{ github.event.pull_request.head.sha }}
           profile: codex
+          max-files: '30'
+          # Optional: match your repository's configured fallback precedence.
+          fallback: |
+            TEAM_GUIDE.md
+            .agents.md
       - uses: actions/upload-artifact@v4
         with:
           name: instruction-impact
@@ -192,7 +264,7 @@ jobs:
             ${{ steps.impact.outputs.json-path }}
 ```
 
-The Action also exposes `existing-files-affected` for your review policy. Its inputs are `base`, `head`, `repository` (default `.`), and `profile`; custom fallback lists are currently a CLI-only feature. Keep the tool revision trusted and pinned. Do not run untrusted PR code in a `pull_request_target` job. Reports can disclose instruction content—review the visibility of job summaries and artifacts before enabling them for a private project.
+The Action also exposes `existing-files-affected` for your review policy. It generates both artifacts from a single analysis; it does not fail on impact by itself. Its inputs are `base`, `head`, `repository` (default `.`), `profile`, `max-files` (default `20`), and `fallback` (one basename per line, in precedence order). Blank fallback lines are ignored; names are passed literally, including spaces. Nonempty fallbacks require the `codex` profile. Keep the tool revision trusted and pinned. Do not run untrusted PR code in a `pull_request_target` job. Reports can disclose instruction content—review the visibility of job summaries and artifacts before enabling them for a private project.
 
 ## What this report does not prove
 
@@ -207,6 +279,21 @@ These boundaries are deliberate. The useful promise is narrower: fixed commits a
 
 ## Development and maintenance
 
+### Project layout
+
+```text
+src/instruction_impact/
+  core.py                 Git snapshots, discovery, transitions, attribution
+  report.py               Safe text and Markdown presentation
+  cli.py                  Arguments, paired report export, exit policies
+action.yml                Read-only GitHub Actions integration
+tests/test_impact.py       Real-Git regressions and actual Action Bash execution
+tests/check_schema.py     Demo output schema and independent path assertions
+examples/demo.py          Five reproducible two-commit scenarios
+docs/                     Design, JSON contract/schema, related-work research
+.github/workflows/        Compatibility, lint, Action, distribution checks
+```
+
 ```sh
 python -m pip install -e '.[dev]'
 python -m unittest discover -s tests -v
@@ -219,4 +306,10 @@ Regression tests use real temporary repositories, including divergent branches, 
 
 The implementation keeps Git/discovery in `core.py`, presentation in `report.py`, and exit policies in `cli.py`. Runtime dependencies remain zero; optional development tools are not needed by users. Contributions should include a counterexample to a plausible wrong implementation, not just another successful invocation. See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-Version 0.2 is an early, maintained scope auditor—not an established ecosystem standard. [CHANGELOG.md](CHANGELOG.md) records behavior and schema changes. Next work should be driven by real repositories: byte-budget modeling needs an explicit session model; staging/worktree support needs a separate snapshot contract. Neither is claimed today. MIT licensed; independent of OpenAI. Related-work research and program facts are recorded [separately](docs/research.md), without claims of unique invention or guaranteed grants.
+### Direction and non-goals
+
+The 0.3 development line adds paired artifacts and configurable Action discovery without changing JSON schema version 2. This remains an early scope auditor—not an established ecosystem standard. [CHANGELOG.md](CHANGELOG.md) records behavior and schema changes.
+
+Future work should be driven by real repositories: byte-budget modeling needs an explicit session model; staging/worktree support needs a separate snapshot contract; monorepo performance claims need reproducible measurements. These are directions, not shipped capabilities. New discovery profiles require authoritative semantics and counterexample fixtures.
+
+MIT licensed; independent of OpenAI. Related-work research and program facts are recorded [separately](docs/research.md), without claims of unique invention or guaranteed grants.

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name = "instruction-impact"
-version = "0.2.0"
+version = "0.3.0"
 description = "Review the file-level blast radius of AGENTS.md changes between Git commits."
 readme = "README.md"
 requires-python = ">=3.10"

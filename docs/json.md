@@ -1,6 +1,8 @@
 # JSON report contract — schema version 2
 
-The machine-readable contract is [report.schema.json](report.schema.json), using JSON Schema Draft 2020-12. CI validates actual demo subprocess output against it. CLI version 0.2.0 emits version 2; consumers of the original version 1 must explicitly migrate. Human report formatting is not a stable parsing interface.
+The machine-readable contract is [report.schema.json](report.schema.json), using JSON Schema Draft 2020-12. CI validates actual demo subprocess output against it. CLI versions 0.2 and 0.3 emit version 2; consumers of the original version 1 must explicitly migrate. Human report formatting is not a stable parsing interface.
+
+`--output-dir NEW_DIRECTORY` saves this same complete contract as UTF-8 `report.json`, together with `report.md` from the same analysis. Only Markdown respects `--max-files`; stdout still follows `--format`. The directory must be new. Artifacts are written before an enabled review gate returns exit 1; I/O errors return exit 2 and may leave partial files. The Action uses this export path internally.
 
 ## Top level
 

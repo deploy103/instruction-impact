@@ -1,5 +1,15 @@
 # Changelog
 
+## 0.3.0 — Unreleased
+
+- Add `--output-dir` to save complete JSON and capped Markdown from one analysis, including when a review gate returns exit 1. Existing destinations are never overwritten; I/O failures return exit 2 and may leave partial new bundles.
+- Generate GitHub Action artifacts in a single analysis instead of comparing the repository twice.
+- Add Action `fallback` (ordered newline-separated basenames) and `max-files` inputs. Blank lines and CRLF input are supported; filenames are passed literally, not evaluated as shell code.
+- Test paired export, overwrite refusal, failed revisions, and the actual Action Bash block with default and custom discovery, including import isolation from target code.
+- Expand both READMEs with the real technology stack, processing architecture, project layout, integration examples, and explicit future-work boundaries.
+
+JSON schema version remains **2**. Existing CLI defaults and Action outputs are unchanged. No package publication is implied by this development version.
+
 ## 0.2.0 — 2026-10-06
 
 ### Behavior

@@ -42,12 +42,13 @@ def run():
         def write(path, text):
             target = repo / path
             target.parent.mkdir(parents=True, exist_ok=True)
-            target.write_text(text)
+            target.write_text(text, encoding="utf-8", newline="\n")
 
         git("init", "-b", "main")
         git("config", "user.name", "Demo")
         git("config", "user.email", "demo@example.invalid")
         git("config", "commit.gpgsign", "false")
+        git("config", "core.autocrlf", "false")
         write("AGENTS.md", "Run unit tests.\n")
         instruction = "api/TEAM.md" if args.scenario == "fallback" else "api/AGENTS.md"
         write(instruction, "Use transactions.\n")

@@ -19,6 +19,9 @@ inputs:
   max-files:
     description: Human report file display cap; JSON remains complete
     default: '20'
+  fail-on:
+    description: Review policy, none, change (any instruction edit), or impact (existing file scope)
+    default: none
 outputs:
   report-path:
     description: Absolute path of the Markdown report
@@ -29,6 +32,12 @@ outputs:
   existing-files-affected:
     description: Number of existing files whose contributing source chain changed
     value: ${{ steps.report.outputs.existing-files-affected }}
+  instruction-changes:
+    description: Number of instruction edits, including shadowed candidates
+    value: ${{ steps.report.outputs.instruction-changes }}
+  gate-triggered:
+    description: Whether the configured review policy returned exit 1 (true or false)
+    value: ${{ steps.report.outputs.gate-triggered }}
 runs:
   using: composite
   steps:
@@ -41,23 +50,38 @@ runs:
         INPUT_PROFILE: ${{ inputs.profile }}
         INPUT_FALLBACK: ${{ inputs.fallback }}
         INPUT_MAX_FILES: ${{ inputs.max-files }}
+        INPUT_FAIL_ON: ${{ inputs.fail-on }}
       run: |
         set -euo pipefail
         export PYTHONPATH="$GITHUB_ACTION_PATH/src"
+        options=(--max-files "$INPUT_MAX_FILES")
+        case "$INPUT_FAIL_ON" in
+          none) ;;
+          change) options+=(--fail-on-change) ;;
+          impact) options+=(--fail-on-impact) ;;
+          *) echo 'instruction-impact: fail-on must be none, change, or impact' >&2; exit 2 ;;
+        esac
         output=$(mktemp -d "$RUNNER_TEMP/instruction-impact.XXXXXX")/reports
-        fallbacks=()
         while IFS= read -r name || [[ -n "$name" ]]; do
           name=${name%$'\r'}
           if [[ -n "$name" ]]; then
-            fallbacks+=("--fallback=$name")
+            options+=("--fallback=$name")
           fi
         done <<< "$INPUT_FALLBACK"
+        status=0
         python -P -m instruction_impact "$INPUT_BASE" "$INPUT_HEAD" \
           --repo "$INPUT_REPOSITORY" --profile "$INPUT_PROFILE" --merge-base \
-          "${fallbacks[@]}" --max-files "$INPUT_MAX_FILES" \
-          --output-dir "$output" --format json > /dev/null
+          "${options[@]}" \
+          --output-dir "$output" --format json > /dev/null || status=$?
+        if [[ "$status" -gt 1 ]]; then exit "$status"; fi
+        counts=$(python -P -c 'import json,sys; s=json.load(open(sys.argv[1], encoding="utf-8"))["summary"]; print("existing-files-affected=" + str(s["existing_files_affected"])); print("instruction-changes=" + str(s["instruction_changes"]))' "$output/report.json")
         echo "report-path=$output/report.md" >> "$GITHUB_OUTPUT"
         echo "json-path=$output/report.json" >> "$GITHUB_OUTPUT"
-        count=$(python -P -c 'import json,sys; print(json.load(open(sys.argv[1]))["summary"]["existing_files_affected"])' "$output/report.json")
-        echo "existing-files-affected=$count" >> "$GITHUB_OUTPUT"
+        printf '%s\n' "$counts" >> "$GITHUB_OUTPUT"
+        if [[ "$status" -eq 1 ]]; then
+          echo 'gate-triggered=true' >> "$GITHUB_OUTPUT"
+        else
+          echo 'gate-triggered=false' >> "$GITHUB_OUTPUT"
+        fi
         cat "$output/report.md" >> "$GITHUB_STEP_SUMMARY"
+        exit "$status"

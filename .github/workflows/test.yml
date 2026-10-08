@@ -4,10 +4,20 @@ permissions:
   contents: read
 jobs:
   test:
-    runs-on: ubuntu-latest
+    runs-on: ${{ matrix.os }}
     strategy:
+      fail-fast: false
       matrix:
+        os: [ubuntu-latest]
         python: ['3.10', '3.12', '3.14']
+        include:
+          - os: windows-latest
+            python: '3.12'
+          - os: macos-latest
+            python: '3.12'
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v5
       - uses: actions/setup-python@v6
@@ -17,6 +27,7 @@ jobs:
       - run: python -m unittest discover -s tests -v
       - run: python tests/check_schema.py
       - run: instruction-impact --help
+      - run: instruction-impact --version
       - name: Reproduce all documented scenarios
         run: |
           for scenario in nested override shadowed empty-override fallback; do
@@ -46,7 +57,25 @@ jobs:
         run: |
           test "$COUNT" = 2
           python -c 'import json,os; r=json.load(open(os.environ["JSON_PATH"])); assert [f["path"] for f in r["affected_files"]] == ["api/auth.py", "api/deep/model.py"]'
-      - uses: actions/upload-artifact@v4
+      - name: Require existing-scope review while retaining evidence
+        uses: ./
+        id: gate
+        continue-on-error: true
+        with:
+          repository: ${{ runner.temp }}/fixture
+          base: HEAD~1
+          profile: codex
+          fail-on: impact
+      - name: Verify failed-gate outputs
+        env:
+          OUTCOME: ${{ steps.gate.outcome }}
+          TRIGGERED: ${{ steps.gate.outputs.gate-triggered }}
+          JSON_PATH: ${{ steps.gate.outputs.json-path }}
+        run: |
+          test "$OUTCOME" = failure
+          test "$TRIGGERED" = true
+          python -c 'import json,os; r=json.load(open(os.environ["JSON_PATH"])); assert r["summary"]["existing_files_affected"] == 2'
+      - uses: actions/upload-artifact@v7
         with:
           name: example-instruction-impact
           path: |
@@ -69,7 +98,7 @@ jobs:
       - uses: actions/setup-python@v6
         with:
           python-version: '3.12'
-      - run: python -m pip install build
+      - run: python -m pip install build twine '.[dev]'
       - name: Verify scratch files never enter distributions
         run: |
           printf '/.amp/in/\n' >> "$(git rev-parse --git-path info/exclude)"
@@ -77,6 +106,15 @@ jobs:
           printf 'must not ship\n' > .amp/in/package-sentinel
           python -m build
           python -c 'import glob,tarfile; names=tarfile.open(glob.glob("dist/*.tar.gz")[0]).getnames(); assert not any("/.amp/in/" in n for n in names)'
+      - run: python -m twine check --strict dist/*
       - run: python -m pip install --force-reinstall dist/*.whl
+      - name: Verify installed package without source checkout imports
+        run: python -I -c 'import importlib.metadata as m; import instruction_impact as i; assert m.version("instruction-impact") == i.__version__ == "1.0.0"; print(i.__version__)'
       - run: python -m unittest discover -s tests -v
+      - run: python tests/check_schema.py
       - run: instruction-impact --help
+      - uses: actions/upload-artifact@v7
+        with:
+          name: instruction-impact-distributions
+          path: dist/*
+          if-no-files-found: error

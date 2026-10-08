@@ -9,6 +9,9 @@ def quoted(value):
 
 
 def fenced(value, language=""):
+    # Diff headers can contain Git paths decoded with surrogateescape.
+    # Keep human output valid UTF-8 while JSON preserves the original path.
+    value = value.encode("utf-8", errors="backslashreplace").decode("utf-8")
     longest = max((len(match) for match in re.findall(r"`+", value)), default=0)
     fence = "`" * max(3, longest + 1)
     return f"{fence}{language}\n{value.rstrip(chr(10))}\n{fence}\n"

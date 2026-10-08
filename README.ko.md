@@ -7,7 +7,7 @@
 [![License: MIT](https://img.shields.io/badge/license-MIT-green)](LICENSE)
 [![Runtime dependencies](https://img.shields.io/badge/runtime_dependencies-0-blue)](pyproject.toml)
 
-[영문 문서](README.md) · [분석 모델과 신뢰 경계](docs/design.md) · [JSON 명세](docs/json.md) · [기존 도구 조사](docs/research.md)
+[영문 문서](README.md) · [분석 모델과 신뢰 경계](docs/design.md) · [JSON 명세](docs/json.md) · [문제 해결](docs/troubleshooting.md) · [1.0 출시 기준](docs/release.md)
 
 **Git 기반 분석 · Codex 선택 규칙 · 파일별 원인 추적 · CI 리뷰 게이트 · 버전 관리되는 JSON**
 
@@ -41,7 +41,7 @@ PR에서 `services/payments/AGENTS.md`의 “단위 테스트를 실행하세요
 | 패키징 | `pyproject.toml`, Hatchling | 설치 가능한 CLI, wheel, 소스 배포본 |
 | 회귀 테스트 | `unittest`, 실제 임시 Git 저장소, `jsonschema` | 선택 규칙, CLI, Action 스크립트, 출력 계약 |
 | 코드 품질 | Ruff | 린트와 포맷 검사 |
-| 호환성 CI | Ubuntu, Python 3.10 / 3.12 / 3.14 | 테스트, 데모, Action, 패키징 검사 |
+| 호환성 CI | Ubuntu: Python 3.10 / 3.12 / 3.14; Windows·macOS: Python 3.12 | 테스트, 데모, Action, 패키징 검사 |
 
 ### 처리 흐름
 
@@ -88,12 +88,15 @@ python -m venv .venv
 . .venv/bin/activate
 python -m pip install .
 
+instruction-impact --version
 python examples/demo.py
 python examples/demo.py --scenario override --format markdown
 python examples/demo.py --scenario shadowed
 python examples/demo.py --scenario empty-override
 python examples/demo.py --scenario fallback --format json
 ```
+
+Windows PowerShell에서는 `.venv\Scripts\Activate.ps1`로 활성화합니다. 활성화 없이 `.venv\Scripts\python -m pip install .`, `.venv\Scripts\python examples/demo.py`로 실행해도 됩니다. 보고서를 저장할 때는 셸의 재인코딩을 피하도록 `--output-dir`을 권장합니다.
 
 데모는 임시 저장소에 커밋 두 개를 만들고 분석한 다음 삭제합니다. `shadowed`에서는 지침 변경 1건·영향 파일 0건, 나머지 시나리오에서는 수정하지 않은 파일 2개의 적용 출처 변경을 확인할 수 있습니다. CI가 이 경로 목록과 JSON 스키마를 실제 출력으로 검사합니다.
 
@@ -153,6 +156,18 @@ fallback은 입력 순서가 우선순위입니다. 홈 폴더의 Codex 설정�
 
 텍스트는 기본 20개 파일까지, Markdown은 각 지침 목록도 20개까지 보여주고 생략 수를 표시합니다. `--max-files`로 조절할 수 있으며 **JSON에는 항상 전체 결과가 들어갑니다.**
 
+### Python API로 연동
+
+```python
+from instruction_impact import analyze, render_markdown
+
+report = analyze("/path/to/repo", "origin/main", "HEAD", profile="codex", merge_base=True)
+assert report["schema_version"] == 2
+print(render_markdown(report, max_files=30))
+```
+
+`analyze`는 CLI JSON과 같은 데이터 계약을 반환하며 게이트 적용이나 파일 저장은 하지 않습니다. 호출자가 summary로 정책을 판단하고 `GitError`, `OSError`, 잘못된 옵션의 `ValueError`를 처리합니다. 사람용 출력은 파싱 인터페이스가 아닙니다. [호환성 정책](docs/release.md#compatibility-policy)을 참고하세요.
+
 ## GitHub Actions에서 팀이 검토할 보고서 만들기
 
 재사용 가능한 composite Action도 제공합니다. PR의 두 커밋을 공통 조상 기준으로 비교해 job summary와 Markdown·JSON 파일을 만듭니다. 분석 대상의 패키지를 설치하거나 코드를 실행하지 않고, 댓글 게시·쓰기 권한도 요구하지 않습니다.
@@ -171,13 +186,16 @@ fallback은 입력 순서가 우선순위입니다. 홈 폴더의 Codex 설정�
     base: ${{ github.event.pull_request.base.sha }}
     head: ${{ github.event.pull_request.head.sha }}
     profile: codex
+    fail-on: impact # 보고서만 만들려면 생략하거나 none
     max-files: '30'
     fallback: |
       TEAM_GUIDE.md
       .agents.md
 ```
 
-Action은 Bash·Python 3.11 이상이 필요합니다. 한 번의 분석으로 두 보고서를 생성하며, 영향이 있다는 이유만으로 Action 자체가 실패하지는 않습니다. 출력 `report-path`, `json-path`, `existing-files-affected`를 artifact 업로드나 정책 검사에 사용할 수 있습니다. `max-files`의 기본값은 20이며 JSON은 줄이지 않습니다. `fallback`은 한 줄에 파일 이름 하나씩 우선순위 순서로 지정하고, 빈 줄은 무시합니다. 공백이 있는 이름도 그대로 전달하며, fallback을 지정하면 `codex` 프로필이 필요합니다. 완전한 workflow는 [영문 README](README.md#github-action-a-report-not-privileged-pr-automation)에 있습니다.
+Action은 Bash·Python 3.11 이상이 필요하며 한 번의 분석으로 두 보고서를 생성합니다. `fail-on` 기본값은 `none`이고, `change`는 모든 후보 지침 변경, `impact`는 기존 파일의 적용 범위 변경을 차단합니다. 차단되더라도 **보고서·출력·job summary를 저장한 뒤** 실패합니다. artifact 업로드 단계에 `always()`와 출력 경로 존재 조건을 넣으면 실패한 리뷰의 증거도 보관할 수 있습니다. 완전한 예시는 [영문 README](README.md#github-action-a-report-not-privileged-pr-automation)에 있습니다.
+
+출력은 `report-path`, `json-path`, `existing-files-affected`, `instruction-changes`, `gate-triggered`(`true`/`false`)입니다. 설정·Git·저장 오류에는 성공한 보고서 출력이 생성되지 않습니다. `max-files`의 기본값은 20이며 JSON은 줄이지 않습니다. `fallback`은 한 줄에 파일 이름 하나씩 우선순위 순서로 지정하고, 빈 줄은 무시합니다. 공백이 있는 이름도 그대로 전달하며, fallback을 지정하면 `codex` 프로필이 필요합니다.
 
 보고서에는 지침 내용이 들어갑니다. 비공개 저장소라면 summary·artifact의 공개 범위를 먼저 확인하세요. 신뢰할 수 없는 PR 코드를 `pull_request_target`에서 실행하는 방식은 사용하지 마세요.
 
@@ -214,13 +232,13 @@ ruff check src tests examples
 ruff format --check src tests examples
 ```
 
-실제 임시 Git 저장소 기반 회귀 테스트, 5개 데모의 JSON 스키마·예상 경로 검사, Python 3.10·3.12·3.14 CI, composite Action 출력 검증을 제공합니다. 구현은 분석·출력·CLI 정책으로 책임을 나누며 런타임 의존성은 없습니다.
+실제 임시 Git 저장소 기반 회귀 테스트와 5개 데모의 JSON 스키마·예상 경로 검사를 제공합니다. CI는 Ubuntu의 Python 3.10·3.12·3.14, Windows·macOS의 Python 3.12를 다룹니다. Action은 Python 3.11 이상에서 실행하며, 리뷰 차단 후에도 출력이 남는지 검사합니다. POSIX 전용 파일명 테스트는 Windows와 구분하고, 지침 심볼릭 링크 거부는 파일시스템 권한 없이 Git 항목으로 검사합니다. 구현은 분석·출력·CLI 정책으로 책임을 나누며 런타임 의존성은 없습니다.
 
 기여할 때는 “성공했다”는 사례보다 **틀린 구현이 실패하는 반례**를 추가해 주세요. `api/`와 `apiary/`, 빈 override와 삭제한 override, 지침 변경과 코드 추가를 구분하는 입력이 좋은 예입니다. [기여 가이드](CONTRIBUTING.md), [변경 이력](CHANGELOG.md)을 참고하세요.
 
 ### 앞으로의 방향
 
-0.3 개발 버전은 보고서 묶음과 Action 설정을 보강하며 JSON 스키마 버전 2는 유지합니다. 아직 초기 프로젝트이며, 실제 사용 사례를 바탕으로 유지관리하는 것이 목표입니다.
+소스 패키지는 **1.0.0**을 목표로 하며 JSON 스키마 버전 **2**는 유지합니다. 제품 범위는 커밋된 지침 영향 분석 CLI·API·Action입니다. [출시 기준](docs/release.md)에 검증 항목과 호환성 정책을 명시했습니다. 소스 버전 변경은 GitHub 릴리스 발행이나 PyPI 배포를 뜻하지 않습니다.
 
 바이트 예산 모델링에는 명시적인 세션 모델, 스테이징·작업 트리 분석에는 별도 스냅샷 계약, 대형 모노레포 성능 주장에는 재현 가능한 측정이 필요합니다. 이는 향후 검토 방향이지 현재 제공하는 기능이 아닙니다. 새 에이전트 프로필은 실제 구현 근거와 반례 테스트를 갖춘 경우에만 추가합니다.
 

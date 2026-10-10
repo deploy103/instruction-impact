@@ -1,0 +1,51 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="572" viewBox="0 0 880 572" role="img" aria-label="Animated terminal demo of instruction-impact reporting unchanged files affected by an AGENTS.md edit">
+<style>
+text{font-family:ui-monospace,SFMono-Regular,Menlo,Consolas,monospace;font-size:14px;white-space:pre;opacity:0}
+.cmd{fill:#7ee787;font-weight:700}.dim{fill:#9da7b3}.cmt{fill:#6e7681;font-style:italic}
+.hd{fill:#e6edf3;font-weight:700}.sec{fill:#79c0ff;font-weight:700}.warn{fill:#ffa657}.ok{fill:#d2a8ff}.hl{fill:#ffa657}
+@keyframes l0{0%,3.750%{opacity:0}3.760%,94%{opacity:1}100%{opacity:0}}
+@keyframes l1{0%,7.187%{opacity:0}7.197%,94%{opacity:1}100%{opacity:0}}
+@keyframes l2{0%,10.625%{opacity:0}10.635%,94%{opacity:1}100%{opacity:0}}
+@keyframes l3{0%,14.062%{opacity:0}14.072%,94%{opacity:1}100%{opacity:0}}
+@keyframes l4{0%,17.500%{opacity:0}17.510%,94%{opacity:1}100%{opacity:0}}
+@keyframes l5{0%,20.938%{opacity:0}20.948%,94%{opacity:1}100%{opacity:0}}
+@keyframes l6{0%,24.375%{opacity:0}24.385%,94%{opacity:1}100%{opacity:0}}
+@keyframes l7{0%,27.812%{opacity:0}27.823%,94%{opacity:1}100%{opacity:0}}
+@keyframes l8{0%,31.250%{opacity:0}31.260%,94%{opacity:1}100%{opacity:0}}
+@keyframes l9{0%,34.688%{opacity:0}34.697%,94%{opacity:1}100%{opacity:0}}
+@keyframes l10{0%,38.125%{opacity:0}38.135%,94%{opacity:1}100%{opacity:0}}
+@keyframes l11{0%,41.562%{opacity:0}41.572%,94%{opacity:1}100%{opacity:0}}
+@keyframes l12{0%,45.000%{opacity:0}45.010%,94%{opacity:1}100%{opacity:0}}
+@keyframes l13{0%,48.438%{opacity:0}48.447%,94%{opacity:1}100%{opacity:0}}
+@keyframes l14{0%,51.875%{opacity:0}51.885%,94%{opacity:1}100%{opacity:0}}
+@keyframes l15{0%,55.312%{opacity:0}55.322%,94%{opacity:1}100%{opacity:0}}
+@keyframes l16{0%,58.750%{opacity:0}58.760%,94%{opacity:1}100%{opacity:0}}
+@keyframes l17{0%,62.188%{opacity:0}62.198%,94%{opacity:1}100%{opacity:0}}
+@keyframes l18{0%,65.625%{opacity:0}65.635%,94%{opacity:1}100%{opacity:0}}
+@keyframes l19{0%,69.062%{opacity:0}69.073%,94%{opacity:1}100%{opacity:0}}
+</style>
+<rect width="880" height="572" rx="10" fill="#0d1117"/>
+<rect width="880" height="40" rx="10" fill="#161b22"/><rect y="30" width="880" height="10" fill="#161b22"/>
+<circle cx="24" cy="20" r="6" fill="#ff5f56"/><circle cx="44" cy="20" r="6" fill="#ffbd2e"/><circle cx="64" cy="20" r="6" fill="#27c93f"/>
+<text x="440.0" y="25" text-anchor="middle" class="dim" style="opacity:1;font-size:13px">instruction-impact demo</text>
+<text x="28" y="80" class="cmd" style="animation:l0 16.0s infinite">$ git diff --stat HEAD~1 HEAD</text>
+<text x="28" y="104" class="dim" style="animation:l1 16.0s infinite"> api/AGENTS.md | 2 +-</text>
+<text x="28" y="128" class="dim" style="animation:l2 16.0s infinite"> 1 file changed, 1 insertion(+), 1 deletion(-)</text>
+<text x="28" y="152" class="dim" style="animation:l3 16.0s infinite"></text>
+<text x="28" y="176" class="cmt" style="animation:l4 16.0s infinite"># Git sees one Markdown edit. What did it really change?</text>
+<text x="28" y="200" class="cmd" style="animation:l5 16.0s infinite">$ instruction-impact HEAD~1 HEAD</text>
+<text x="28" y="224" class="hd" style="animation:l6 16.0s infinite">Instruction impact: 2224fd90157c -&gt; 390e88f3ebbf [agents]</text>
+<text x="28" y="248" class="hd" style="animation:l7 16.0s infinite">1 instruction change(s); 2 affected file(s); 2 with unchanged file content/mode.</text>
+<text x="28" y="272" class="dim" style="animation:l8 16.0s infinite"></text>
+<text x="28" y="296" class="sec" style="animation:l9 16.0s infinite">INSTRUCTION EDITS</text>
+<text x="28" y="320" class="warn" style="animation:l10 16.0s infinite">  [modified] &quot;api/AGENTS.md&quot; - 2 affected file(s)</text>
+<text x="28" y="344" class="dim" style="animation:l11 16.0s infinite">    selection: selected -&gt; selected</text>
+<text x="28" y="368" class="dim" style="animation:l12 16.0s infinite"></text>
+<text x="28" y="392" class="sec" style="animation:l13 16.0s infinite">CONTEXT TRANSITIONS</text>
+<text x="28" y="416" class="ok" style="animation:l14 16.0s infinite">  [unchanged] &quot;api/auth.py&quot;</text>
+<text x="28" y="440" class="dim" style="animation:l15 16.0s infinite">    before: &quot;AGENTS.md&quot;@fa088e0d -&gt; &quot;api/AGENTS.md&quot;@3de1b019</text>
+<text x="28" y="464" class="hl" style="animation:l16 16.0s infinite">    after:  &quot;AGENTS.md&quot;@fa088e0d -&gt; &quot;api/AGENTS.md&quot;@07a33fe8</text>
+<text x="28" y="488" class="ok" style="animation:l17 16.0s infinite">  [unchanged] &quot;api/deep/model.py&quot;</text>
+<text x="28" y="512" class="dim" style="animation:l18 16.0s infinite">    before: &quot;AGENTS.md&quot;@fa088e0d -&gt; &quot;api/AGENTS.md&quot;@3de1b019</text>
+<text x="28" y="536" class="hl" style="animation:l19 16.0s infinite">    after:  &quot;AGENTS.md&quot;@fa088e0d -&gt; &quot;api/AGENTS.md&quot;@07a33fe8</text>
+</svg>

@@ -9,6 +9,11 @@
 
 **[한국어](README.ko.md)** · [Discovery model](docs/design.md) · [JSON contract](docs/json.md) · [Troubleshooting](docs/troubleshooting.md) · [Release readiness](docs/release.md)
 
+
+<p align="center">
+  <img src="docs/assets/demo.svg" alt="Animated terminal demo: a one-line AGENTS.md edit and the unchanged files whose instruction chain it changes" width="860">
+</p>
+
 **Git-native analysis · Codex-aware discovery · Source attribution · CI review gates · Versioned JSON**
 
 A pull request changes `services/payments/AGENTS.md` from “run unit tests” to “skip tests for generated changes.” Git shows one Markdown edit. The review question is larger: **which files will now inherit that guidance, including files nobody touched?**
